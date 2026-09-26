@@ -1,5 +1,6 @@
 import React from 'react';
 import { type Task } from '../../types';
+import type { PrioritizationConfig } from '../../utils/prioritization';
 import { compareTaskIds, sortByPriority } from '../../utils/task-sorting';
 import type { ReorderTaskPayload } from '../lib/api';
 import { parseStoredUtcDate } from '../utils/date-display';
@@ -18,7 +19,7 @@ interface TaskColumnProps {
   onCleanup?: () => void;
   laneId?: string;
   targetMilestone?: string | null;
-  priorityOrder?: string[];
+  prioritization?: PrioritizationConfig;
   availableTypes?: string[];
   availableProjects?: string[];
   dateFormat?: string;
@@ -72,7 +73,7 @@ const TaskColumn: React.FC<TaskColumnProps> = ({
   onCleanup,
   laneId,
   targetMilestone,
-  priorityOrder,
+  prioritization,
   availableTypes,
   availableProjects,
   dateFormat,
@@ -127,7 +128,7 @@ const TaskColumn: React.FC<TaskColumnProps> = ({
   };
 
   const handleSortByPriority = () => {
-    emitColumnReorder(sortByPriority(tasks, priorityOrder).map(t => t.id));
+    emitColumnReorder(sortByPriority(tasks, prioritization).map(t => t.id));
   };
 
   const handleSortByCreatedDate = (direction: CreatedDateSortDirection) => {

@@ -177,7 +177,7 @@ describe("sortByPriority", () => {
 			{ id: "task-5" },
 		];
 
-		const sorted = sortByPriority(tasks, ["Very High", "High", "Medium", "Low", "Very Low"]);
+		const sorted = sortByPriority(tasks, { priorities: ["Very High", "High", "Medium", "Low", "Very Low"] });
 		expect(sorted.map((task) => task.id)).toEqual(["task-2", "task-4", "task-1", "task-3", "task-5"]);
 	});
 

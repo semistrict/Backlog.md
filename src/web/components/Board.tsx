@@ -101,6 +101,10 @@ const Board: React.FC<BoardProps> = ({
     () => [{ label: 'All priorities', value: '' }, ...getPriorityOptions(availablePriorities)],
     [availablePriorities]
   );
+  const prioritization = useMemo(
+    () => ({ priorities: availablePriorities }),
+    [availablePriorities]
+  );
   const typeOptions = useMemo(() => getTaskTypeValues(availableTypes), [availableTypes]);
   const projectOptions = useMemo(() => getProjectValues(availableProjects), [availableProjects]);
   const archivedMilestoneIds = useMemo(
@@ -893,7 +897,7 @@ const Board: React.FC<BoardProps> = ({
                             dragSourceLane={dragSourceLane}
                             laneId={lane.key}
                             targetMilestone={lane.milestone ?? null}
-                            priorityOrder={availablePriorities}
+                            prioritization={prioritization}
                             availableTypes={typeOptions}
                             availableProjects={projectOptions}
                             dateFormat={dateFormat}
@@ -925,7 +929,7 @@ const Board: React.FC<BoardProps> = ({
                   dragSourceStatus={dragSourceStatus}
                   dragSourceLane={dragSourceLane}
                   laneId={DEFAULT_LANE_KEY}
-                  priorityOrder={availablePriorities}
+                  prioritization={prioritization}
                   availableTypes={typeOptions}
                   availableProjects={projectOptions}
                   dateFormat={dateFormat}

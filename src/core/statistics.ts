@@ -1,4 +1,5 @@
 import type { Task } from "../types/index.ts";
+import { getPrioritizationMode, type PrioritizationConfig } from "../utils/prioritization.ts";
 import { getPriorityValues, normalizePriorityValue } from "../utils/priority-config.ts";
 
 export interface TaskStatistics {
@@ -21,16 +22,18 @@ export interface TaskStatistics {
 }
 
 /**
- * Calculate comprehensive task statistics for the overview
+ * Calculate comprehensive task statistics for the overview. Priority counts stay empty in RICE mode,
+ * where priority is not used.
  */
 export function getTaskStatistics(
 	tasks: Task[],
 	drafts: Task[],
 	statuses: string[],
-	priorityOrder?: readonly string[],
+	config?: PrioritizationConfig | null,
 ): TaskStatistics {
 	const statusCounts = new Map<string, number>();
 	const priorityCounts = new Map<string, number>();
+	const countsPriorities = getPrioritizationMode(config) === "priority";
 
 	// Initialize status counts
 	for (const status of statuses) {
@@ -38,8 +41,10 @@ export function getTaskStatistics(
 	}
 
 	// Initialize priority counts
-	for (const priority of getPriorityValues(priorityOrder)) {
-		priorityCounts.set(priority, 0);
+	if (countsPriorities) {
+		for (const priority of getPriorityValues(config)) {
+			priorityCounts.set(priority, 0);
+		}
 	}
 
 	let completedTasks = 0;
@@ -72,12 +77,14 @@ export function getTaskStatistics(
 		}
 
 		// Count by priority
-		const priority = normalizePriorityValue(task.priority);
-		if (priority) {
-			const priorityCount = priorityCounts.get(priority) || 0;
-			priorityCounts.set(priority, priorityCount + 1);
-		} else {
-			noPriorityCount++;
+		if (countsPriorities) {
+			const priority = normalizePriorityValue(task.priority);
+			if (priority) {
+				const priorityCount = priorityCounts.get(priority) || 0;
+				priorityCounts.set(priority, priorityCount + 1);
+			} else {
+				noPriorityCount++;
+			}
 		}
 
 		// Track recent activity

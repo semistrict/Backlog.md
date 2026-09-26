@@ -3,6 +3,7 @@ import { JSDOM } from "jsdom";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import type { Task } from "../types/index.ts";
+import type { PrioritizationConfig } from "../utils/prioritization.ts";
 import TaskColumn from "../web/components/TaskColumn.tsx";
 import type { ReorderTaskPayload } from "../web/lib/api.ts";
 
@@ -30,7 +31,7 @@ const setupDom = () => {
 const renderTaskColumn = (
 	tasks: Task[],
 	onTaskReorder: (payload: ReorderTaskPayload) => void,
-	options: { title?: string; onCleanup?: () => void; priorityOrder?: string[] } = {},
+	options: { title?: string; onCleanup?: () => void; prioritization?: PrioritizationConfig } = {},
 ): HTMLElement => {
 	setupDom();
 	const container = document.getElementById("root");
@@ -45,7 +46,7 @@ const renderTaskColumn = (
 				onEditTask={() => {}}
 				onTaskReorder={onTaskReorder}
 				onCleanup={options.onCleanup}
-				priorityOrder={options.priorityOrder}
+				prioritization={options.prioritization}
 			/>,
 		);
 	});
@@ -134,7 +135,7 @@ describe("TaskColumn priority sorting", () => {
 				createTask({ id: "TASK-3", title: "Very high", priority: "very high" }),
 			],
 			(payload) => payloads.push(payload),
-			{ priorityOrder: ["Very High", "Medium", "Very Low"] },
+			{ prioritization: { priorities: ["Very High", "Medium", "Very Low"] } },
 		);
 
 		await openActionsMenu(container);

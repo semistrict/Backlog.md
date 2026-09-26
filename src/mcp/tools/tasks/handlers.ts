@@ -178,7 +178,6 @@ export class TaskHandlers {
 			throw new BacklogToolError("unassigned cannot be combined with assignee.", "VALIDATION_ERROR");
 		}
 		const config = await this.core.filesystem.loadConfig();
-		const priorities = config?.priorities;
 		if (this.isDraftStatus(args.status)) {
 			let drafts = applyTaskFilters(await this.core.filesystem.listDrafts(), {
 				query: args.search,
@@ -208,7 +207,7 @@ export class TaskHandlers {
 				};
 			}
 
-			let sortedDrafts = sortByOrdinalAndPriority(drafts, priorities);
+			let sortedDrafts = sortByOrdinalAndPriority(drafts, config);
 			if (typeof args.limit === "number" && args.limit >= 0) {
 				sortedDrafts = sortedDrafts.slice(0, args.limit);
 			}
@@ -302,7 +301,7 @@ export class TaskHandlers {
 		let remaining = typeof args.limit === "number" && args.limit >= 0 ? args.limit : undefined;
 		for (const status of orderedStatuses) {
 			const bucket = grouped.get(status) ?? [];
-			const sortedBucket = sortByOrdinalAndPriority(bucket, priorities);
+			const sortedBucket = sortByOrdinalAndPriority(bucket, config);
 			const limitedBucket = remaining !== undefined ? sortedBucket.slice(0, remaining) : sortedBucket;
 			if (remaining !== undefined) {
 				remaining -= limitedBucket.length;

@@ -73,6 +73,8 @@ export interface Task {
 	subtasks?: string[];
 	subtaskSummaries?: Array<{ id: string; title: string }>;
 	priority?: string;
+	/** RICE inputs, used when config `prioritization` is `rice`. The score is always derived, never stored. */
+	rice?: RiceInputs;
 	/** Semantic task type (e.g. bug, feature). Allowed values come from config `types` (defaults to DEFAULT_TASK_TYPES); absent means untyped. */
 	type?: string;
 	/** Monorepo project/component this task belongs to. Allowed values come from config `projects`; absent config means the field is unusable. */
@@ -112,12 +114,23 @@ export function isLocalEditableTask(task: Task): boolean {
 	return task.source === undefined || task.source === "local" || task.source === "completed";
 }
 
+export type RiceInputKey = "reach" | "impact" | "confidence" | "effort";
+
+/** Reach per period, impact (3/2/1/0.5/0.25), confidence percent (100/80/50), effort in person-time. */
+export type RiceInputs = Partial<Record<RiceInputKey, number>>;
+
+export type RiceInputsUpdate = Partial<Record<RiceInputKey, number | null>>;
+
+/** How tasks are ranked: by an ordered priority label, or by RICE score. */
+export type PrioritizationMode = "priority" | "rice";
+
 export interface TaskCreateInput {
 	title: string;
 	dueDate?: string;
 	description?: string;
 	status?: TaskStatus;
 	priority?: string;
+	rice?: RiceInputs;
 	type?: string;
 	project?: string;
 	ordinal?: number;
@@ -144,6 +157,8 @@ export interface TaskUpdateInput {
 	description?: string;
 	status?: TaskStatus;
 	priority?: string;
+	/** Sets each given input; `null` clears it. Inputs left out are kept. */
+	rice?: RiceInputsUpdate;
 	type?: string;
 	project?: string | null;
 	milestone?: string | null;
@@ -329,6 +344,8 @@ export interface BacklogConfig {
 	types?: string[];
 	/** Ordered task priority labels. Defaults to High, Medium, Low when not configured. */
 	priorities?: string[];
+	/** Ranking model. `rice` replaces priority with RICE inputs on every surface. Defaults to `priority`. */
+	prioritization?: PrioritizationMode;
 	/** Allowed monorepo project/component values. No default; the `project` field is unusable until this is configured. */
 	projects?: string[];
 	/** @deprecated Milestones are sourced from milestone files, not config. */

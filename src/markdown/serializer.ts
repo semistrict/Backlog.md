@@ -66,6 +66,7 @@ export function serializeTask(task: Task): string {
 		...(task.parentTaskId && { parent_task_id: task.parentTaskId }),
 		...(task.subtasks && task.subtasks.length > 0 && { subtasks: task.subtasks }),
 		...(task.priority && { priority: task.priority }),
+		...(task.rice && { rice: task.rice }),
 		...(task.type && { type: task.type }),
 		...(task.project && { project: task.project }),
 		...(task.ordinal !== undefined && { ordinal: task.ordinal }),

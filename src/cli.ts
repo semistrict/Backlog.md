@@ -2702,7 +2702,7 @@ async function runTaskList(
 		// The sort field was validated above, before any task was read.
 		const sortField = options.sort ? options.sort.toLowerCase() : "priority";
 		const narrowForDisplay = <T extends Task>(rows: T[]): T[] => {
-			const sorted = sortTasks(rows, sortField, config?.priorities);
+			const sorted = sortTasks(rows, sortField, config);
 			const narrowed = parentFilter
 				? sorted.filter((task) => task.parentTaskId && taskIdsEqual(parentFilter, task.parentTaskId))
 				: sorted;
@@ -2867,9 +2867,9 @@ async function runTaskList(
 				if (!TASK_SORT_FIELDS.includes(sortField)) {
 					throw new Error(`Invalid sort field: ${options.sort}. Valid values are: ${TASK_SORT_FIELD_LIST}`);
 				}
-				sortedTasks = sortTasks(tasks, sortField, config?.priorities);
+				sortedTasks = sortTasks(tasks, sortField, config);
 			} else {
-				sortedTasks = sortTasks(tasks, "priority", config?.priorities);
+				sortedTasks = sortTasks(tasks, "priority", config);
 			}
 
 			let filtered = sortedTasks;
@@ -4080,7 +4080,7 @@ addListWindowOptions(draftListCommand)
 		await core.ensureConfigLoaded();
 		const drafts = await core.filesystem.listDrafts();
 		const config = await core.filesystem.loadConfig();
-		const sortedDrafts = sortTasks(drafts, sortField, config?.priorities);
+		const sortedDrafts = sortTasks(drafts, sortField, config);
 
 		if (outputMode !== "interactive" || sortedDrafts.length === 0) {
 			// Plain text output for non-interactive environments

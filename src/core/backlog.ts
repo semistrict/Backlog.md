@@ -26,6 +26,8 @@ import {
 	EntityType,
 	isLocalEditableTask,
 	type Milestone,
+	type RiceInputs,
+	type RiceInputsUpdate,
 	type SearchFilters,
 	type Task,
 	type TaskCommentInput,
@@ -60,6 +62,13 @@ import {
 	getPrefixForType,
 	normalizeId,
 } from "../utils/prefix-config.ts";
+import {
+	applyRiceUpdate,
+	assertPrioritizationMode,
+	hasRiceInputs,
+	type PrioritizationConfig,
+	riceInputsEqual,
+} from "../utils/prioritization.ts";
 import { formatValidPriorityValues, resolvePriorityValue } from "../utils/priority-config.ts";
 import {
 	formatValidProjectValues,
@@ -284,6 +293,7 @@ function buildUpdatedDateComparableTask(task: Task): Record<string, unknown> {
 		parentTaskId: task.parentTaskId,
 		subtasks: task.subtasks ?? [],
 		priority: task.priority,
+		rice: task.rice,
 		type: task.type,
 		project: task.project,
 		onStatusChange: task.onStatusChange,
@@ -828,15 +838,27 @@ export class Core {
 	}
 
 	private async normalizePriority(value: string | undefined): Promise<string | undefined> {
-		if (value === undefined || value.trim() === "") {
+		if (value === undefined) {
 			return undefined;
 		}
 		const config = await this.fs.loadConfig();
+		assertPrioritizationMode(config, "priority");
+		if (value.trim() === "") {
+			return undefined;
+		}
 		const normalized = resolvePriorityValue(value, config);
 		if (!normalized) {
 			throw new Error(`Invalid priority: ${value}. Valid values are: ${formatValidPriorityValues(config)}`);
 		}
 		return normalized;
+	}
+
+	private async normalizeRice(
+		current: RiceInputs | undefined,
+		update: RiceInputsUpdate,
+	): Promise<RiceInputs | undefined> {
+		assertPrioritizationMode(await this.fs.loadConfig(), "rice");
+		return applyRiceUpdate(current, update);
 	}
 
 	private async normalizeTaskType(value: string | undefined): Promise<string | undefined> {
@@ -1764,6 +1786,7 @@ export class Core {
 		}
 
 		const priority = await this.normalizePriority(input.priority);
+		const rice = input.rice && hasRiceInputs(input.rice) ? await this.normalizeRice(undefined, input.rice) : undefined;
 		const type = await this.normalizeTaskType(input.type);
 		const project = await this.normalizeProject(input.project);
 		const createdDate = new Date().toISOString().slice(0, 16).replace("T", " ");
@@ -1836,6 +1859,7 @@ export class Core {
 				...(dueDate && { dueDate }),
 				...(parentTaskId && { parentTaskId }),
 				...(priority && { priority }),
+				...(rice && { rice }),
 				...(type && { type }),
 				...(project && { project }),
 				...(typeof ordinal === "number" && { ordinal }),
@@ -2023,6 +2047,18 @@ export class Core {
 			const normalizedPriority = await this.normalizePriority(String(input.priority));
 			if (task.priority !== normalizedPriority) {
 				task.priority = normalizedPriority;
+				mutated = true;
+			}
+		}
+
+		if (input.rice && hasRiceInputs(input.rice)) {
+			const rice = await this.normalizeRice(task.rice, input.rice);
+			if (!riceInputsEqual(task.rice, rice)) {
+				if (rice) {
+					task.rice = rice;
+				} else {
+					delete task.rice;
+				}
 				mutated = true;
 			}
 		}
@@ -4178,11 +4214,14 @@ export class Core {
 	 */
 	async loadAllTasksForStatistics(
 		progressCallback?: (msg: string) => void,
-	): Promise<{ tasks: Task[]; drafts: Task[]; statuses: string[]; priorities: string[] }> {
+	): Promise<{ tasks: Task[]; drafts: Task[]; statuses: string[]; prioritization: PrioritizationConfig }> {
 		const snapshot = await this.loadTaskCorpusSnapshot(progressCallback);
 		const config = snapshot.config;
 		const statuses = (config?.statuses || DEFAULT_STATUSES) as string[];
-		const priorities = config?.priorities ?? [];
+		const prioritization: PrioritizationConfig = {
+			priorities: config?.priorities,
+			prioritization: config?.prioritization,
+		};
 		if (!snapshot.identityIndex) throw new Error("Task corpus identity index was not initialized");
 		const tasks = snapshot.identityIndex.getTasks(true);
 
@@ -4190,7 +4229,7 @@ export class Core {
 		progressCallback?.("Loading drafts...");
 		const drafts = await this.fs.listDrafts();
 
-		return { tasks, drafts, statuses: statuses as string[], priorities };
+		return { tasks, drafts, statuses: statuses as string[], prioritization };
 	}
 
 	/**

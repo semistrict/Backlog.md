@@ -548,7 +548,7 @@ describe("shared immutable branch task loading", () => {
 		const statistics = await core.loadAllTasksForStatistics();
 
 		expect(statistics.statuses).toEqual(["Queued", "Done"]);
-		expect(statistics.priorities).toEqual(["Urgent"]);
+		expect(statistics.prioritization).toEqual({ priorities: ["Urgent"], prioritization: undefined });
 	});
 
 	it("does not let an old-root fetch lease suppress the new root", async () => {

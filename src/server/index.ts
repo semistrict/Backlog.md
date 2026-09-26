@@ -2000,10 +2000,8 @@ export class BacklogServer {
 			const tasks = corpus.identityIndex?.getTasks(true) ?? [...corpus.activeTasks, ...corpus.completedTasks];
 			const drafts = await this.core.filesystem.listDrafts();
 			const statuses = (corpusConfig?.statuses || DEFAULT_STATUSES) as string[];
-			const priorities = currentConfig?.priorities ?? corpusConfig?.priorities ?? [];
-
 			// Calculate statistics using the exact same function as CLI
-			const statistics = getTaskStatistics(tasks, drafts, statuses, priorities);
+			const statistics = getTaskStatistics(tasks, drafts, statuses, currentConfig ?? corpusConfig);
 
 			// Convert Maps to objects for JSON serialization
 			const response = {

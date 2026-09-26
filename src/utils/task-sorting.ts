@@ -1,4 +1,4 @@
-import { getPriorityRank } from "./priority-config.ts";
+import { compareTaskRank, type PrioritizationConfig, type RankedTask } from "./prioritization.ts";
 
 /**
  * Parse a task ID into its numeric components for proper sorting.
@@ -96,26 +96,15 @@ export function sortByTaskId<T extends { id: string }>(items: T[]): T[] {
 }
 
 /**
- * Sort an array of tasks by their priority property.
- * Priority order defaults to high > medium > low > undefined.
- * Tasks with the same priority are sorted by task ID.
+ * Sort an array of tasks by the project's ranking: priority order (high > medium > low > none by
+ * default) or, in RICE mode, RICE score (highest first, unscored last).
+ * Tasks with the same rank are sorted by task ID.
  */
-export function sortByPriority<T extends { id: string; priority?: string }>(
+export function sortByPriority<T extends { id: string } & RankedTask>(
 	items: T[],
-	priorityOrder?: readonly string[],
+	config?: PrioritizationConfig | null,
 ): T[] {
-	return [...items].sort((a, b) => {
-		const aWeight = getPriorityRank(a.priority, priorityOrder);
-		const bWeight = getPriorityRank(b.priority, priorityOrder);
-
-		// First sort by priority (higher weight = higher priority)
-		if (aWeight !== bWeight) {
-			return bWeight - aWeight;
-		}
-
-		// If priorities are the same, sort by task ID
-		return compareTaskIds(a.id, b.id);
-	});
+	return [...items].sort((a, b) => compareTaskRank(a, b, config) || compareTaskIds(a.id, b.id));
 }
 
 /**
@@ -146,12 +135,12 @@ export function sortByOrdinal<T extends { id: string; ordinal?: number }>(items:
 }
 
 /**
- * Sort an array of tasks considering ordinal first, then priority, then ID.
+ * Sort an array of tasks considering ordinal first, then rank (see {@link sortByPriority}), then ID.
  * This is the default sorting for the board view.
  */
-export function sortByOrdinalAndPriority<T extends { id: string; ordinal?: number; priority?: string }>(
+export function sortByOrdinalAndPriority<T extends { id: string; ordinal?: number } & RankedTask>(
 	items: T[],
-	priorityOrder?: readonly string[],
+	config?: PrioritizationConfig | null,
 ): T[] {
 	return [...items].sort((a, b) => {
 		// Tasks with ordinal come before tasks without
@@ -169,37 +158,29 @@ export function sortByOrdinalAndPriority<T extends { id: string; ordinal?: numbe
 			}
 		}
 
-		// Same ordinal (or both undefined) - sort by priority
-		const aWeight = getPriorityRank(a.priority, priorityOrder);
-		const bWeight = getPriorityRank(b.priority, priorityOrder);
-
-		if (aWeight !== bWeight) {
-			return bWeight - aWeight;
-		}
-
-		// Same priority - sort by task ID
-		return compareTaskIds(a.id, b.id);
+		// Same ordinal (or both undefined) - sort by rank, then task ID
+		return compareTaskRank(a, b, config) || compareTaskIds(a.id, b.id);
 	});
 }
 
 /**
  * Sort tasks by a specified field with fallback to task ID sorting.
- * Supported fields: 'priority', 'id', 'ordinal'
+ * Supported fields: 'priority' (the project's ranking), 'id', 'ordinal'
  */
-export function sortTasks<T extends { id: string; priority?: string; ordinal?: number }>(
+export function sortTasks<T extends { id: string; ordinal?: number } & RankedTask>(
 	items: T[],
 	sortField: string,
-	priorityOrder?: readonly string[],
+	config?: PrioritizationConfig | null,
 ): T[] {
 	switch (sortField?.toLowerCase()) {
 		case "priority":
-			return sortByPriority(items, priorityOrder);
+			return sortByPriority(items, config);
 		case "id":
 			return sortByTaskId(items);
 		case "ordinal":
 			return sortByOrdinal(items);
 		default:
-			// Default to ordinal + priority sorting for board view
-			return sortByOrdinalAndPriority(items, priorityOrder);
+			// Default to ordinal + rank sorting for board view
+			return sortByOrdinalAndPriority(items, config);
 	}
 }

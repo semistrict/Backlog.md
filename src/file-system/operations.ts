@@ -26,6 +26,7 @@ import {
 	idForFilename,
 	normalizeId,
 } from "../utils/prefix-config.ts";
+import { PRIORITIZATION_MODES, parsePrioritizationMode } from "../utils/prioritization.ts";
 import { matchesProjectFilter } from "../utils/project-config.ts";
 import { normalizeStatusSet, statusMatchesSet } from "../utils/status-filter.ts";
 import { withoutVacatedTaskLinks } from "../utils/task-links.ts";
@@ -2166,6 +2167,20 @@ ${description || `Milestone: ${title}`}`,
 				case "task_prefix":
 					config.prefixes = { task: value.replace(/['"]/g, "") };
 					break;
+				case "prioritization": {
+					const raw = value.replace(/['"]/g, "");
+					const mode = parsePrioritizationMode(raw);
+					if (!mode) {
+						throw configValueError(
+							this.resolvedConfigPath,
+							key,
+							`expected ${PRIORITIZATION_MODES.join(" or ")}, got "${raw}"`,
+							`Set it to ${PRIORITIZATION_MODES.join(" or ")}, then run the command again.`,
+						);
+					}
+					config.prioritization = mode;
+					break;
+				}
 				case "backlog_directory":
 				case "backlogDirectory":
 					config.backlogDirectory = value.replace(/['"]/g, "");
@@ -2181,6 +2196,7 @@ ${description || `Milestone: ${title}`}`,
 			labels: config.labels || [],
 			types: config.types,
 			priorities: config.priorities,
+			prioritization: config.prioritization,
 			projects: config.projects,
 			definitionOfDone: config.definitionOfDone,
 			defaultStatus: config.defaultStatus,
@@ -2218,6 +2234,7 @@ ${description || `Milestone: ${title}`}`,
 			...(config.priorities && config.priorities.length > 0
 				? [`priorities: [${config.priorities.map((p) => `"${p}"`).join(", ")}]`]
 				: []),
+			...(config.prioritization ? [`prioritization: ${config.prioritization}`] : []),
 			...(config.projects && config.projects.length > 0
 				? [`projects: [${config.projects.map((p) => `"${p}"`).join(", ")}]`]
 				: []),

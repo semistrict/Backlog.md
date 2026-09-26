@@ -73,7 +73,7 @@ describe("getTaskStatistics", () => {
 			createTask({ id: "task-3" }),
 		];
 
-		const stats = getTaskStatistics(tasks, [], statuses, ["None", "Very High"]);
+		const stats = getTaskStatistics(tasks, [], statuses, { priorities: ["None", "Very High"] });
 
 		expect(stats.priorityCounts.get("none")).toBe(1);
 		expect(stats.priorityCounts.get("very high")).toBe(1);
