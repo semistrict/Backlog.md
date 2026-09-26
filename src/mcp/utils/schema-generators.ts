@@ -1,5 +1,6 @@
 import { DEFAULT_STATUSES } from "../../constants/index.ts";
-import type { BacklogConfig } from "../../types/index.ts";
+import type { BacklogConfig, RiceInputKey } from "../../types/index.ts";
+import { getPrioritizationMode, RICE_CONFIDENCE_OPTIONS, RICE_IMPACT_OPTIONS } from "../../utils/prioritization.ts";
 import { getPriorityLabels } from "../../utils/priority-config.ts";
 import { getProjectValues } from "../../utils/project-config.ts";
 import { getTaskTypeValues } from "../../utils/task-type-config.ts";
@@ -131,6 +132,48 @@ function generatePriorityFieldSchema(config: Pick<BacklogConfig, "priorities">):
 	};
 }
 
+function formatRiceScale(scale: ReadonlyArray<{ value: number; label: string }>): string {
+	return scale.map((step) => `${step.value} (${step.label.toLowerCase()})`).join(", ");
+}
+
+/**
+ * RICE input fields. Core validates impact and confidence against their fixed scales, since the
+ * validator's enum only covers strings.
+ */
+function generateRiceFieldSchemas(clearable: boolean): Record<RiceInputKey, JsonSchema> {
+	const type = clearable ? ["number", "null"] : "number";
+	const clearHint = clearable ? " Pass null to clear it." : "";
+	return {
+		reach: {
+			type,
+			minimum: 0,
+			description: `RICE reach: how many people or events the task affects per period, 0 or more.${clearHint}`,
+		},
+		impact: {
+			type,
+			description: `RICE impact, one of ${formatRiceScale(RICE_IMPACT_OPTIONS)}.${clearHint}`,
+		},
+		confidence: {
+			type,
+			description: `RICE confidence in percent, one of ${formatRiceScale(RICE_CONFIDENCE_OPTIONS)}.${clearHint}`,
+		},
+		effort: {
+			type,
+			description: `RICE effort, such as person-months; greater than 0.${clearHint}`,
+		},
+	};
+}
+
+/** The fields a task is ranked by: priority, or the four RICE inputs when prioritization is rice. */
+function generateRankingFieldSchemas(
+	config: Pick<BacklogConfig, "priorities" | "prioritization">,
+	clearable: boolean,
+): Record<string, JsonSchema> {
+	return getPrioritizationMode(config) === "rice"
+		? generateRiceFieldSchemas(clearable)
+		: { priority: generatePriorityFieldSchema(config) };
+}
+
 /**
  * Generates a project field schema with dynamic enum values sourced from config.
  * Unlike priority and type, projects has no default set, so callers must omit this
@@ -174,7 +217,7 @@ export function generateTaskCreateSchema(config: BacklogConfig): JsonSchema {
 			},
 			status: generateStatusFieldSchema(config),
 			dueDate: generateDueDateFieldSchema("Optional task due date."),
-			priority: generatePriorityFieldSchema(config),
+			...generateRankingFieldSchemas(config, false),
 			type: generateTypeFieldSchema(config),
 			...(getProjectValues(config).length > 0 ? { project: generateProjectFieldSchema(config) } : {}),
 			ordinal: {
@@ -295,7 +338,7 @@ export function generateTaskEditSchema(config: BacklogConfig): JsonSchema {
 			},
 			status: generateStatusFieldSchema(config),
 			dueDate: generateDueDateFieldSchema("Set the task due date, or pass null to clear it.", true),
-			priority: generatePriorityFieldSchema(config),
+			...generateRankingFieldSchemas(config, true),
 			type: generateTypeFieldSchema(config),
 			...(getProjectValues(config).length > 0 ? { project: generateProjectFieldSchema(config) } : {}),
 			ordinal: {
@@ -536,7 +579,9 @@ export function generateTaskEditSchema(config: BacklogConfig): JsonSchema {
 	};
 }
 
-export function generateTaskSearchSchema(config: Pick<BacklogConfig, "priorities" | "types" | "projects">): JsonSchema {
+export function generateTaskSearchSchema(
+	config: Pick<BacklogConfig, "priorities" | "prioritization" | "types" | "projects">,
+): JsonSchema {
 	return {
 		type: "object",
 		properties: {
@@ -550,7 +595,7 @@ export function generateTaskSearchSchema(config: Pick<BacklogConfig, "priorities
 			},
 			type: generateTypeFilterSchema(config),
 			...(getProjectValues(config).length > 0 ? { project: generateProjectFilterSchema(config) } : {}),
-			priority: generatePriorityFieldSchema(config),
+			...(getPrioritizationMode(config) === "priority" ? { priority: generatePriorityFieldSchema(config) } : {}),
 			modifiedFiles: {
 				type: "array",
 				items: { type: "string", maxLength: 500 },

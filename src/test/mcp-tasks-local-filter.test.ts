@@ -62,6 +62,9 @@ describe("MCP task tools local filtering", () => {
 		const laterActiveTask = { ...localTask, id: "task-20" };
 		const earlierCompletedTask = { ...completedTask, id: "task-1" };
 		const handlers = new TaskHandlers({
+			filesystem: {
+				loadConfig: async () => null,
+			},
 			loadTasks: async () => {
 				crossBranchLoads++;
 				return [localTask, remoteTask];

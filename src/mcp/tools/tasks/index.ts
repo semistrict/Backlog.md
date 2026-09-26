@@ -1,4 +1,5 @@
 import type { BacklogConfig } from "../../../types/index.ts";
+import { getPrioritizationMode } from "../../../utils/prioritization.ts";
 import type { McpServer } from "../../server.ts";
 import type { McpToolHandler } from "../../types.ts";
 import {
@@ -57,8 +58,9 @@ export function registerTaskTools(server: McpServer, config: BacklogConfig): voi
 	const editTaskTool: McpToolHandler = createSimpleValidatedTool(
 		{
 			name: "task_edit",
-			description:
-				"Edit a Backlog.md task, including metadata (status, priority, type, project), implementation plan/notes, dependencies, acceptance criteria, and task-specific Definition of Done items",
+			description: `Edit a Backlog.md task, including metadata (status, ${
+				getPrioritizationMode(config) === "rice" ? "RICE reach/impact/confidence/effort" : "priority"
+			}, type, project), implementation plan/notes, dependencies, acceptance criteria, and task-specific Definition of Done items`,
 			inputSchema: taskEditSchema,
 			annotations: { title: "Edit Task", destructiveHint: false },
 		},

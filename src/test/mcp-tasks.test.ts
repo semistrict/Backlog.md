@@ -756,8 +756,10 @@ describe("MCP task tools (MVP)", () => {
 			},
 		});
 
-		// The setup mutations above moved task files; dispose the content store so
-		// pending fs-watcher reconciles can't fire inside the tripwire window.
+		// The setup mutations above moved task files. Drain the reconciles their watcher events
+		// queued (the store runs them in order behind this refresh), then dispose the store so
+		// none can still be loading, or start, inside the tripwire window.
+		await (await mcpServer.getContentStore()).refreshLocalTaskCorpus();
 		mcpServer.disposeContentStore();
 
 		const tripwires = installCrossBranchTripwires(mcpServer);

@@ -6,6 +6,7 @@ import { loadTaskListItems } from "../../../core/task-detail.ts";
 import { isCreateLockError, isTaskLockError } from "../../../file-system/operations.ts";
 import {
 	isLocalEditableTask,
+	type RiceInputs,
 	type SearchPriorityFilter,
 	type Task,
 	type TaskListFilter,
@@ -19,6 +20,7 @@ import {
 	type MilestoneFilterValueResolver,
 } from "../../../utils/milestone-filter.ts";
 import { resolveMilestoneInputForStorage } from "../../../utils/milestone-storage.ts";
+import { formatTaskRankBadge, type PrioritizationConfig, pickRiceInputs } from "../../../utils/prioritization.ts";
 import { buildTaskUpdateInput } from "../../../utils/task-edit-builder.ts";
 import { applyTaskFilters, createTaskSearchIndex } from "../../../utils/task-search.ts";
 import { sortByOrdinalAndPriority } from "../../../utils/task-sorting.ts";
@@ -29,7 +31,7 @@ import type { McpServer } from "../../server.ts";
 import type { CallToolResult } from "../../types.ts";
 import { formatTaskCallResult } from "../../utils/task-response.ts";
 
-export type TaskCreateArgs = {
+export type TaskCreateArgs = RiceInputs & {
 	title: string;
 	description?: string;
 	labels?: string[];
@@ -103,8 +105,13 @@ export class TaskHandlers {
 		return (status ?? "").trim().toLowerCase() === "draft";
 	}
 
-	private formatTaskSummaryLine(task: Task, options: { includeStatus?: boolean } = {}): string {
-		const priorityIndicator = task.priority ? `[${task.priority.toUpperCase()}] ` : "";
+	private formatTaskSummaryLine(
+		task: Task,
+		prioritization: PrioritizationConfig | null,
+		options: { includeStatus?: boolean } = {},
+	): string {
+		const rankBadge = formatTaskRankBadge(task, prioritization);
+		const priorityIndicator = rankBadge ? `[${rankBadge}] ` : "";
 		const typeIndicator = task.type ? `[${task.type}] ` : "";
 		const projectIndicator = task.project ? `[${task.project}] ` : "";
 		const status = task.status || (task.source === "completed" ? "Done" : "");
@@ -144,6 +151,7 @@ export class TaskHandlers {
 				dueDate: args.dueDate,
 				status: args.status,
 				priority: args.priority,
+				rice: pickRiceInputs(args),
 				type: args.type,
 				project: args.project,
 				...(typeof rawOrdinal === "number" ? { ordinal: rawOrdinal } : {}),
@@ -213,7 +221,7 @@ export class TaskHandlers {
 			}
 			const lines = ["Draft:"];
 			for (const draft of sortedDrafts) {
-				lines.push(this.formatTaskSummaryLine(draft));
+				lines.push(this.formatTaskSummaryLine(draft, config));
 			}
 
 			return {
@@ -311,7 +319,7 @@ export class TaskHandlers {
 			}
 			const sectionLines: string[] = [`${status || "No Status"}:`];
 			for (const task of limitedBucket) {
-				sectionLines.push(this.formatTaskSummaryLine(task));
+				sectionLines.push(this.formatTaskSummaryLine(task, config));
 			}
 			contentItems.push({
 				type: "text",
@@ -344,6 +352,7 @@ export class TaskHandlers {
 	}
 
 	async searchTasks(args: TaskSearchArgs): Promise<CallToolResult> {
+		const config = await this.core.filesystem.loadConfig();
 		const query = args.query?.trim() ?? "";
 		const modifiedFiles = args.modifiedFiles?.map((file) => file.trim()).filter((file) => file.length > 0);
 		if (!query && (!modifiedFiles || modifiedFiles.length === 0) && !args.type?.length && !args.project?.length) {
@@ -381,7 +390,7 @@ export class TaskHandlers {
 
 			const lines: string[] = ["Tasks:"];
 			for (const draft of draftMatches) {
-				lines.push(this.formatTaskSummaryLine(draft, { includeStatus: true }));
+				lines.push(this.formatTaskSummaryLine(draft, config, { includeStatus: true }));
 			}
 
 			return {
@@ -422,7 +431,7 @@ export class TaskHandlers {
 
 		const lines: string[] = ["Tasks:"];
 		for (const task of taskResults) {
-			lines.push(this.formatTaskSummaryLine(task, { includeStatus: true }));
+			lines.push(this.formatTaskSummaryLine(task, config, { includeStatus: true }));
 		}
 
 		return {
