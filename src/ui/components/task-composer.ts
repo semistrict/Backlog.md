@@ -1,8 +1,20 @@
 import type { BoxInterface, ScreenInterface, TextboxInterface } from "neo-neo-bblessed";
 import { box, textarea, textbox } from "neo-neo-bblessed";
 import { DEFAULT_STATUSES } from "../../constants/index.ts";
-import type { Task, TaskCreateInput } from "../../types/index.ts";
+import type { PrioritizationMode, RiceInputKey, RiceInputs, Task, TaskCreateInput } from "../../types/index.ts";
 import { normalizeDueDate } from "../../utils/due-date.ts";
+import {
+	applyRiceUpdate,
+	computeRiceScore,
+	formatAllowedRiceInput,
+	formatRiceScore,
+	getRiceInputLabel,
+	hasRiceInputs,
+	parseRiceInputs,
+	RICE_CONFIDENCE_OPTIONS,
+	RICE_IMPACT_OPTIONS,
+	requireRiceInput,
+} from "../../utils/prioritization.ts";
 import { getPriorityOptions } from "../../utils/priority-config.ts";
 import { getProjectValues } from "../../utils/project-config.ts";
 import { getTaskTypeValues } from "../../utils/task-type-config.ts";
@@ -11,11 +23,15 @@ import {
 	createScrollableViewport,
 	type FilterPopupChoice,
 	openSingleSelectFilterPopup,
+	openTextInputPopup,
 } from "./filter-popup.ts";
 
 const DRAFT_STATUS = "Draft";
 
-/** Tab order, matching the top-to-bottom reading order of the composer. */
+/**
+ * Tab order, matching the top-to-bottom reading order of the composer. The "priority" field is the
+ * ranking slot: a priority selector, or a RICE field in RICE mode.
+ */
 const FIELD_ORDER = ["title", "description", "dueDate", "status", "type", "priority", "create", "cancel"] as const;
 const FIELD_ORDER_WITH_PROJECT = [
 	"title",
@@ -141,6 +157,7 @@ export type TaskComposerValues = {
 	status: string;
 	type: string;
 	priority: string;
+	rice: RiceInputs;
 	project: string;
 	dueDate: string;
 };
@@ -161,6 +178,7 @@ export type TaskComposerLayoutOptions = {
 	statuses?: readonly string[];
 	types?: readonly string[];
 	priorities?: readonly string[];
+	prioritization?: PrioritizationMode;
 	projects?: readonly string[];
 };
 
@@ -179,6 +197,20 @@ function selectorContent(label: string, value: string): string {
 	return `${label}: ${displayChoice(value)} ▼`;
 }
 
+/** The RICE field shows only the score; the inputs are asked for when it is chosen. */
+function riceSelectorContent(rice: RiceInputs): string {
+	const score = computeRiceScore(rice);
+	return selectorContent("RICE", score !== undefined ? formatRiceScore(score) : hasRiceInputs(rice) ? "unscored" : "");
+}
+
+/** Widest ranking-slot content: the longest priority choice, or the longest RICE state. */
+function getRankSlotChoices(options: TaskComposerLayoutOptions): Array<[string, FilterPopupChoice[]]> {
+	if (options.prioritization === "rice") {
+		return [["RICE", [{ label: "unscored", value: "unscored" }]]];
+	}
+	return [["Priority", getTaskComposerPriorityChoices(options.priorities)]];
+}
+
 function getSelectorContentWidths(options: TaskComposerLayoutOptions): {
 	longest: number;
 	longestCompactColumn: number;
@@ -186,7 +218,7 @@ function getSelectorContentWidths(options: TaskComposerLayoutOptions): {
 	const selectors: Array<[string, FilterPopupChoice[]]> = [
 		["Status", getTaskComposerStatusChoices(options.statuses ?? DEFAULT_STATUSES)],
 		["Type", getTaskComposerTypeChoices(options.types)],
-		["Priority", getTaskComposerPriorityChoices(options.priorities)],
+		...getRankSlotChoices(options),
 		...(getProjectValues(options.projects).length > 0
 			? ([["Project", getTaskComposerProjectChoices(options.projects)]] as Array<[string, FilterPopupChoice[]]>)
 			: []),
@@ -197,7 +229,8 @@ function getSelectorContentWidths(options: TaskComposerLayoutOptions): {
 		for (const choice of choices) {
 			const width = Bun.stringWidth(selectorContent(label, choice.value));
 			longest = Math.max(longest, width);
-			if (label === "Type" || label === "Priority") longestCompactColumn = Math.max(longestCompactColumn, width);
+			if (label === "Type" || label === "Priority" || label === "RICE")
+				longestCompactColumn = Math.max(longestCompactColumn, width);
 		}
 	}
 	return { longest, longestCompactColumn };
@@ -329,6 +362,7 @@ export function createTaskComposerValues(statuses: readonly string[]): TaskCompo
 		status: getTaskComposerWorkflowStatuses(statuses)[0] ?? "To Do",
 		type: "",
 		priority: "",
+		rice: {},
 		project: "",
 		dueDate: "",
 	};
@@ -346,6 +380,7 @@ export function toTaskCreateInput(values: TaskComposerValues): TaskCreateInput {
 		...(dueDate && { dueDate }),
 		...(values.type && { type: values.type }),
 		...(values.priority && { priority: values.priority }),
+		...(hasRiceInputs(values.rice) && { rice: values.rice }),
 		...(values.project && { project: values.project }),
 	};
 }
@@ -391,9 +426,64 @@ export type TaskComposerOptions = {
 	statuses: readonly string[];
 	types?: readonly string[];
 	priorities?: readonly string[];
+	/** In RICE mode the ranking slot collects the four RICE inputs instead of a priority. */
+	prioritization?: PrioritizationMode;
 	projects?: readonly string[];
 	persist: (input: TaskCreateInput) => Promise<Task>;
 };
+
+function riceScaleChoices(scale: ReadonlyArray<{ value: number; label: string }>, unit = ""): FilterPopupChoice[] {
+	return [
+		{ label: "None", value: "" },
+		...scale.map((step) => ({ label: `${step.value}${unit} - ${step.label}`, value: String(step.value) })),
+	];
+}
+
+function validateRiceText(key: RiceInputKey): (value: string) => string | undefined {
+	return (value) => {
+		if (!value) return undefined;
+		try {
+			requireRiceInput(key, value);
+			return undefined;
+		} catch (error) {
+			return error instanceof Error ? error.message : `Invalid ${key}.`;
+		}
+	};
+}
+
+/**
+ * Asks for reach, impact, confidence and effort in turn, each starting from its current value.
+ * Resolves to the new inputs, or null when any prompt is cancelled so nothing changes.
+ */
+export async function promptRiceInputs(screen: ScreenInterface, current: RiceInputs): Promise<RiceInputs | null> {
+	const initial = (key: RiceInputKey) => (current[key] === undefined ? "" : String(current[key]));
+	const askText = (key: RiceInputKey) =>
+		openTextInputPopup({
+			screen,
+			title: `RICE ${getRiceInputLabel(key)} (${formatAllowedRiceInput(key)}; blank for none)`,
+			initialValue: initial(key),
+			validate: validateRiceText(key),
+		});
+	const askScale = (key: "impact" | "confidence", choices: FilterPopupChoice[]) =>
+		openSingleSelectFilterPopup({
+			screen,
+			title: `RICE ${getRiceInputLabel(key)}`,
+			choices,
+			selectedValue: initial(key),
+		});
+
+	const reach = await askText("reach");
+	if (reach === null) return null;
+	const impact = await askScale("impact", riceScaleChoices(RICE_IMPACT_OPTIONS));
+	if (impact === null) return null;
+	const confidence = await askScale("confidence", riceScaleChoices(RICE_CONFIDENCE_OPTIONS, "%"));
+	if (confidence === null) return null;
+	const effort = await askText("effort");
+	if (effort === null) return null;
+
+	const update = parseRiceInputs({ reach, impact, confidence, effort }, { prioritization: "rice" });
+	return (update && applyRiceUpdate(undefined, update)) ?? {};
+}
 
 export async function openTaskComposer(options: TaskComposerOptions): Promise<Task | null> {
 	return new Promise<Task | null>((resolve) => {
@@ -504,6 +594,9 @@ export async function openTaskComposer(options: TaskComposerOptions): Promise<Ta
 			});
 		const statusField = createSelector("Status", controller.values.status);
 		const typeField = createSelector("Type", controller.values.type);
+		const riceMode = options.prioritization === "rice";
+		const rankSlotContent = () =>
+			riceMode ? riceSelectorContent(controller.values.rice) : selectorContent("Priority", controller.values.priority);
 		const priorityField = createSelector("Priority", controller.values.priority);
 		const projectField = createSelector("Project", controller.values.project);
 
@@ -658,7 +751,7 @@ export async function openTaskComposer(options: TaskComposerOptions): Promise<Ta
 			}
 			statusField.setContent(selectorContent("Status", controller.values.status));
 			typeField.setContent(selectorContent("Type", controller.values.type));
-			priorityField.setContent(selectorContent("Priority", controller.values.priority));
+			priorityField.setContent(rankSlotContent());
 			scrollFieldIntoView(activeField);
 		};
 
@@ -784,9 +877,25 @@ export async function openTaskComposer(options: TaskComposerOptions): Promise<Ta
 			else focusField("create");
 		};
 
+		const openRicePrompts = async () => {
+			pickerOpen = true;
+			try {
+				const rice = await promptRiceInputs(options.screen, controller.values.rice);
+				if (rice) controller.values.rice = rice;
+			} finally {
+				pickerOpen = false;
+				applyLayout();
+				focusField("priority");
+			}
+		};
+
 		const openPicker = async (field: "status" | "type" | "priority" | "project") => {
 			if (pickerOpen || controller.submitting) return;
 			syncInputs();
+			if (field === "priority" && riceMode) {
+				await openRicePrompts();
+				return;
+			}
 			pickerOpen = true;
 			const currentValue = controller.values[field];
 			const choices =

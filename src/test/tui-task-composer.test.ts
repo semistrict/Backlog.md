@@ -242,6 +242,7 @@ describe("TUI task composer model", () => {
 				status: "Review",
 				type: "Feature",
 				priority: "urgent",
+				rice: {},
 				project: "",
 				dueDate: "2026-08-10",
 			}),
@@ -261,6 +262,7 @@ describe("TUI task composer model", () => {
 				status: "To Do",
 				type: "",
 				priority: "",
+				rice: {},
 				project: "",
 				dueDate: "",
 			}),
@@ -276,6 +278,7 @@ describe("TUI task composer model", () => {
 				status: "To Do",
 				type: "",
 				priority: "",
+				rice: {},
 				project: "Web",
 				dueDate: "",
 			}),
@@ -390,6 +393,7 @@ describe("TUI task composer model", () => {
 			status: "Review",
 			type: "",
 			priority: "",
+			rice: {},
 			project: "",
 			dueDate: "",
 		});
@@ -1182,6 +1186,111 @@ describe("TUI task composer selector navigation", () => {
 		expect(layout.stackSelectors).toBe(true);
 
 		expect(await focusSelectorThenPressDown(46, 18, "Type:")).toStartWith("Priority:");
+	});
+});
+
+describe("TUI task composer in RICE mode", () => {
+	async function answerText(screen: unknown, value: string): Promise<void> {
+		// A prompt opened right after a picker closes starts reading input a tick later.
+		await settleComposerFocus();
+		const focused = (screen as { focused?: TestWidget }).focused;
+		expect(focused?.type).toBe("textbox");
+		typeText(focused, value);
+		pressKey(focused, "enter", "\r");
+		await settleComposerFocus();
+	}
+
+	async function answerChoice(screen: unknown, expectedChoices: string[], downPresses: number): Promise<void> {
+		const focused = (screen as { focused?: TestWidget }).focused;
+		expect(focused?.items?.map((item) => item.content)).toEqual(expectedChoices);
+		for (let press = 0; press < downPresses; press += 1) pressKey(focused, "down");
+		pressKey(focused, "enter", "\r");
+		await settleComposerFocus();
+	}
+
+	it("asks for the four RICE inputs from the ranking slot and creates the task with them", async () => {
+		const screen = createScreen({ smartCSR: false });
+		Object.defineProperty(screen, "width", { configurable: true, value: 100, writable: true });
+		Object.defineProperty(screen, "height", { configurable: true, value: 30, writable: true });
+		const created: TaskCreateInput[] = [];
+		try {
+			const resultPromise = openTaskComposer({
+				screen,
+				statuses: ["To Do", "Done"],
+				priorities: ["High", "Low"],
+				prioritization: "rice",
+				persist: async (input) => {
+					created.push(input);
+					return task();
+				},
+			});
+			await settleComposerFocus();
+			const widgets = collectWidgets(screen as unknown as { children?: unknown[] });
+			expect(widgets.some((widget) => widget.content?.startsWith("Priority:"))).toBe(false);
+			const riceSlot = widgets.find((widget) => widget.content === "RICE: None ▼");
+			const title = widgets.find((widget) => widget.options?.label === " Title ");
+
+			clickWidget(title);
+			await settleComposerFocus();
+			typeText(title, "Scored from TUI");
+
+			clickWidget(riceSlot);
+			await settleComposerFocus();
+			await answerText(screen, "500");
+			await answerChoice(screen, ["None", "3 - Massive", "2 - High", "1 - Medium", "0.5 - Low", "0.25 - Minimal"], 2);
+			await answerChoice(screen, ["None", "100% - High", "80% - Medium", "50% - Low"], 2);
+			await answerText(screen, "3");
+			expect(riceSlot?.content).toBe("RICE: 266.7 ▼");
+
+			const createButton = widgets.find((widget) => widget.content === "Create task");
+			pressKey(createButton, "enter", "\r");
+			await withTimeout(resultPromise, "RICE composer create", 1000);
+			expect(created).toEqual([
+				{ title: "Scored from TUI", status: "To Do", rice: { reach: 500, impact: 2, confidence: 80, effort: 3 } },
+			]);
+		} finally {
+			screen.destroy();
+		}
+	});
+
+	it("keeps the previous inputs when a RICE prompt is cancelled", async () => {
+		const screen = createScreen({ smartCSR: false });
+		Object.defineProperty(screen, "width", { configurable: true, value: 100, writable: true });
+		Object.defineProperty(screen, "height", { configurable: true, value: 30, writable: true });
+		const eventScreen = screen as unknown as { focused?: TestWidget };
+		try {
+			const resultPromise = openTaskComposer({
+				screen,
+				statuses: ["To Do"],
+				prioritization: "rice",
+				persist: async () => task(),
+			});
+			await settleComposerFocus();
+			const widgets = collectWidgets(screen as unknown as { children?: unknown[] });
+			const riceSlot = widgets.find((widget) => widget.content === "RICE: None ▼");
+
+			clickWidget(riceSlot);
+			await settleComposerFocus();
+			await answerText(screen, "40");
+			pressKey(eventScreen.focused, "escape", "\x1b");
+			await settleComposerFocus();
+			expect(riceSlot?.content).toBe("RICE: None ▼");
+			expect(eventScreen.focused).toBe(riceSlot);
+
+			pressKey(eventScreen.focused, "escape", "\x1b");
+			expect(await withTimeout(resultPromise, "RICE composer cancellation", 1000)).toBeNull();
+		} finally {
+			screen.destroy();
+		}
+	});
+
+	it("keeps the rice slot within the composer's selector widths", () => {
+		const layout = getTaskComposerLayout(100, 30, { prioritization: "rice" });
+		expect(layout.stackSelectors).toBe(false);
+		expect(toTaskCreateInput({ ...createTaskComposerValues(["To Do"]), title: "No RICE" })).toEqual({
+			title: "No RICE",
+			status: "To Do",
+		});
 	});
 });
 

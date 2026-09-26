@@ -1,11 +1,14 @@
-import type { Task } from "../types/index.ts";
-import { getPrioritizationMode, type PrioritizationConfig } from "../utils/prioritization.ts";
+import type { PrioritizationMode, Task } from "../types/index.ts";
+import { computeRiceScore, getPrioritizationMode, type PrioritizationConfig } from "../utils/prioritization.ts";
 import { getPriorityValues, normalizePriorityValue } from "../utils/priority-config.ts";
 
 export interface TaskStatistics {
 	statusCounts: Map<string, number>;
+	/** Which breakdown below applies: priority counts, or RICE scored/unscored counts. */
+	prioritization: PrioritizationMode;
 	priorityCounts: Map<string, number>;
 	noPriorityCount: number;
+	riceCounts: { scored: number; unscored: number };
 	totalTasks: number;
 	completedTasks: number;
 	completionPercentage: number;
@@ -22,8 +25,8 @@ export interface TaskStatistics {
 }
 
 /**
- * Calculate comprehensive task statistics for the overview. Priority counts stay empty in RICE mode,
- * where priority is not used.
+ * Calculate comprehensive task statistics for the overview. Only the active prioritization mode's
+ * breakdown is counted: priority counts stay empty in RICE mode, and RICE counts in priority mode.
  */
 export function getTaskStatistics(
 	tasks: Task[],
@@ -33,7 +36,9 @@ export function getTaskStatistics(
 ): TaskStatistics {
 	const statusCounts = new Map<string, number>();
 	const priorityCounts = new Map<string, number>();
-	const countsPriorities = getPrioritizationMode(config) === "priority";
+	const prioritization = getPrioritizationMode(config);
+	const countsPriorities = prioritization === "priority";
+	const riceCounts = { scored: 0, unscored: 0 };
 
 	// Initialize status counts
 	for (const status of statuses) {
@@ -76,7 +81,7 @@ export function getTaskStatistics(
 			completedTasks++;
 		}
 
-		// Count by priority
+		// Count by priority, or by whether RICE can score the task
 		if (countsPriorities) {
 			const priority = normalizePriorityValue(task.priority);
 			if (priority) {
@@ -85,6 +90,10 @@ export function getTaskStatistics(
 			} else {
 				noPriorityCount++;
 			}
+		} else if (computeRiceScore(task.rice) === undefined) {
+			riceCounts.unscored++;
+		} else {
+			riceCounts.scored++;
 		}
 
 		// Track recent activity
@@ -162,8 +171,10 @@ export function getTaskStatistics(
 
 	return {
 		statusCounts,
+		prioritization,
 		priorityCounts,
 		noPriorityCount,
+		riceCounts,
 		totalTasks,
 		completedTasks,
 		completionPercentage,

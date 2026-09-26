@@ -11,6 +11,23 @@ const priorityColors: Record<string, string> = {
 	none: "gray",
 };
 
+/** The ranking breakdown for the project's prioritization mode, with its heading. */
+function getRankBreakdown(statistics: TaskStatistics): {
+	title: string;
+	rows: Array<{ label: string; count: number; color: string }>;
+} {
+	if (statistics.prioritization === "rice") {
+		return {
+			title: "RICE Breakdown",
+			rows: [
+				{ label: "Scored", count: statistics.riceCounts.scored, color: "magenta" },
+				{ label: "Unscored", count: statistics.riceCounts.unscored, color: "gray" },
+			].filter((row) => row.count > 0),
+		};
+	}
+	return { title: "Priority Breakdown", rows: getPriorityBreakdownRows(statistics) };
+}
+
 function getPriorityBreakdownRows(statistics: TaskStatistics): Array<{ label: string; count: number; color: string }> {
 	const rows = Array.from(statistics.priorityCounts)
 		.filter(([, count]) => count > 0)
@@ -90,7 +107,8 @@ export async function renderOverviewTui(statistics: TaskStatistics, projectName:
 		}
 		statusBox.setContent(statusContent);
 
-		// Priority Breakdown Section (Top Right)
+		// Ranking Breakdown Section (Top Right)
+		const rankBreakdown = getRankBreakdown(statistics);
 		const priorityBox = box({
 			parent: container,
 			top: 3,
@@ -98,7 +116,7 @@ export async function renderOverviewTui(statistics: TaskStatistics, projectName:
 			width: "50%",
 			height: "40%",
 			border: { type: "line" },
-			label: " Priority Breakdown ",
+			label: ` ${rankBreakdown.title} `,
 			style: {
 				border: { fg: "gray" },
 			},
@@ -111,7 +129,7 @@ export async function renderOverviewTui(statistics: TaskStatistics, projectName:
 		});
 
 		let priorityContent = "";
-		for (const { label, count, color } of getPriorityBreakdownRows(statistics)) {
+		for (const { label, count, color } of rankBreakdown.rows) {
 			const percentage = statistics.totalTasks > 0 ? Math.round((count / statistics.totalTasks) * 100) : 0;
 			priorityContent += `  {${color}-fg}${label}:{/${color}-fg} ${count} tasks (${percentage}%)\n`;
 		}
@@ -241,8 +259,9 @@ function renderPlainTextOverview(statistics: TaskStatistics, projectName: string
 		console.log(`  Drafts: ${statistics.draftCount}`);
 	}
 
-	console.log("\nPriority Breakdown:");
-	for (const { label, count } of getPriorityBreakdownRows(statistics)) {
+	const rankBreakdown = getRankBreakdown(statistics);
+	console.log(`\n${rankBreakdown.title}:`);
+	for (const { label, count } of rankBreakdown.rows) {
 		const percentage = statistics.totalTasks > 0 ? Math.round((count / statistics.totalTasks) * 100) : 0;
 		console.log(`  ${label}: ${count} tasks (${percentage}%)`);
 	}

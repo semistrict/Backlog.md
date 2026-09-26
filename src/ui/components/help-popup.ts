@@ -1,4 +1,5 @@
 import type { ScreenInterface } from "neo-neo-bblessed";
+import type { FilterShortcutOptions } from "../footer-content.ts";
 import { createPopupChrome, createScrollableViewport } from "./filter-popup.ts";
 
 export type HelpPopupContext = "board" | "task-list";
@@ -52,12 +53,12 @@ const TASK_LIST_SHORTCUTS: Shortcut[] = [
 	{ key: "q/Esc", desc: "Quit / Close" },
 ];
 
-export function getHelpShortcuts(
-	context: HelpPopupContext = "board",
-	options: { hasProjects?: boolean } = {},
-): Shortcut[] {
+export function getHelpShortcuts(context: HelpPopupContext = "board", options: FilterShortcutOptions = {}): Shortcut[] {
 	const shortcuts = context === "task-list" ? TASK_LIST_SHORTCUTS : BOARD_SHORTCUTS;
-	return options.hasProjects ? shortcuts : shortcuts.filter((shortcut) => shortcut.key !== "V");
+	return shortcuts.filter(
+		(shortcut) =>
+			(options.hasProjects || shortcut.key !== "V") && (options.hasPriority !== false || shortcut.key !== "P"),
+	);
 }
 
 /** Popup rows spent on borders, the top spacer and the help line, leaving one row per shortcut. */
@@ -77,7 +78,7 @@ export function getHelpPopupHeight(shortcutCount: number, screenHeight: number):
 export async function openHelpPopup(
 	screen: ScreenInterface,
 	context: HelpPopupContext = "board",
-	options: { hasProjects?: boolean } = {},
+	options: FilterShortcutOptions = {},
 ): Promise<void> {
 	return new Promise<void>((resolve) => {
 		let settled = false;

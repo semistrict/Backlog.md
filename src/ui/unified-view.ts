@@ -526,6 +526,7 @@ export async function runUnifiedView(options: UnifiedViewOptions): Promise<void>
 					dateFormat: config?.dateFormat,
 					projectName: config?.projectName,
 					priorities: config?.priorities,
+					prioritization: config?.prioritization,
 					types: config?.types,
 					projects: config?.projects,
 					hideEmptyColumns: config?.hideEmptyColumns ?? false,

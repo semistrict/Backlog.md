@@ -1,5 +1,5 @@
 import type { BoxInterface, ScreenInterface } from "neo-neo-bblessed";
-import { box, list, scrollablebox } from "neo-neo-bblessed";
+import { box, list, scrollablebox, textbox } from "neo-neo-bblessed";
 import { createGenericList } from "./generic-list.ts";
 
 export interface FilterPopupChoice {
@@ -262,6 +262,70 @@ export async function openSingleSelectFilterPopup(options: {
 
 		setImmediate(() => {
 			picker.focus();
+			options.screen.render();
+		});
+	});
+}
+
+/**
+ * A one-line text prompt. Resolves to the trimmed text on Enter, or null on Esc. A message from
+ * `validate` is shown under the input and keeps the prompt open.
+ */
+export async function openTextInputPopup(options: {
+	screen: ScreenInterface;
+	title: string;
+	initialValue: string;
+	validate?: (value: string) => string | undefined;
+}): Promise<string | null> {
+	return new Promise<string | null>((resolve) => {
+		let settled = false;
+		const { popup, close } = createPopupChrome({
+			screen: options.screen,
+			title: options.title,
+			helpText: " {cyan-fg}[Enter]{/} Accept | {cyan-fg}[Esc]{/} Cancel",
+			width: 56,
+			height: 7,
+		});
+		const input = textbox({
+			parent: popup,
+			top: 0,
+			left: 1,
+			right: 1,
+			height: 3,
+			border: { type: "line" },
+			keys: true,
+			inputOnFocus: false,
+			style: { border: { fg: "yellow" } },
+		});
+		const errorBox = box({ parent: popup, top: 3, left: 2, right: 2, height: 1, style: { fg: "red" } });
+		input.setValue(options.initialValue);
+
+		const finish = (value: string | null) => {
+			if (settled) return;
+			settled = true;
+			input.destroy();
+			errorBox.destroy();
+			close();
+			options.screen.render();
+			resolve(value);
+		};
+
+		input.on("submit", (value?: string) => {
+			const text = String(value ?? input.getValue()).trim();
+			const error = options.validate?.(text);
+			if (error) {
+				errorBox.setContent(error);
+				input.readInput();
+				options.screen.render();
+				return;
+			}
+			finish(text);
+		});
+		input.on("cancel", () => finish(null));
+
+		setImmediate(() => {
+			input.focus();
+			input.readInput();
 			options.screen.render();
 		});
 	});

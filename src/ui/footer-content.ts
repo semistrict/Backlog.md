@@ -5,20 +5,32 @@
  * The bound key is the lowercase letter (some actions also bind an explicit `S-` variant,
  * which is how Shift+letter is delivered). Filter letters are listed in the same order the
  * filter header renders its controls (status, type, project, priority, milestone, labels).
- * The project filter (`V`) is only bound when the project configures `projects:`, so it is
- * listed only when it is actually available, matching the help popup.
+ * The project filter (`V`) is only bound when the project configures `projects:`, and the
+ * priority filter (`P`) is not bound in RICE mode, so each is listed only when it is actually
+ * available, matching the help popup.
  */
-function filterKeys(before: string[], after: string[], hasProjects: boolean): string {
-	return [...before, ...(hasProjects ? ["V"] : []), ...after].join("/");
+export type FilterShortcutOptions = {
+	hasProjects?: boolean;
+	/** False in RICE mode, where there is no priority to filter by. Defaults to true. */
+	hasPriority?: boolean;
+};
+
+function filterKeys(before: string[], after: string[], options: FilterShortcutOptions): string {
+	return [
+		...before,
+		...(options.hasProjects ? ["V"] : []),
+		...(options.hasPriority === false ? [] : ["P"]),
+		...after,
+	].join("/");
 }
 
-export function getBoardFooterContent(options: { hasProjects?: boolean } = {}): string {
-	const keys = filterKeys(["T"], ["P", "I", "F"], options.hasProjects ?? false);
+export function getBoardFooterContent(options: FilterShortcutOptions = {}): string {
+	const keys = filterKeys(["T"], ["I", "F"], options);
 	return ` {cyan-fg}[Tab]{/} View | {cyan-fg}[N]{/} New | {cyan-fg}[/]{/} Search | {cyan-fg}[${keys}]{/} Filter | {cyan-fg}[←→/↑↓]{/} Nav | {cyan-fg}[Enter]{/} Details | {cyan-fg}[E/M/C/A]{/} Edit/Move/Comp/Arch | {cyan-fg}[Y]{/} Yank | {cyan-fg}[?]{/} Help | {cyan-fg}[q]{/} Quit`;
 }
 
-export function getTaskListFooterContent(options: { hasProjects?: boolean } = {}): string {
-	const keys = filterKeys(["S", "T"], ["P", "I", "L"], options.hasProjects ?? false);
+export function getTaskListFooterContent(options: FilterShortcutOptions = {}): string {
+	const keys = filterKeys(["S", "T"], ["I", "L"], options);
 	return ` {cyan-fg}[Tab]{/} View | {cyan-fg}[/]{/} Search | {cyan-fg}[${keys}]{/} Filter | {cyan-fg}[↑↓]{/} Nav | {cyan-fg}[E/C/A]{/} Edit/Comp/Arch | {cyan-fg}[Y]{/} Yank | {cyan-fg}[?]{/} Help | {cyan-fg}[q]{/} Quit`;
 }
 

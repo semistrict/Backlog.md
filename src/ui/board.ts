@@ -7,7 +7,7 @@ import {
 	generateMilestoneGroupedBoard,
 } from "../board.ts";
 import { type Core, createRuntimeCore } from "../core/backlog.ts";
-import type { LabelMatchMode, Milestone, Task, TaskCreateInput } from "../types/index.ts";
+import type { LabelMatchMode, Milestone, PrioritizationMode, Task, TaskCreateInput } from "../types/index.ts";
 import { copyToClipboard } from "../utils/clipboard.ts";
 import { areLabelSelectionsEqual, collectAvailableLabels } from "../utils/label-filter.ts";
 import {
@@ -15,6 +15,7 @@ import {
 	NO_MILESTONE_FILTER_LABEL,
 	NO_MILESTONE_FILTER_VALUE,
 } from "../utils/milestone-filter.ts";
+import { getPrioritizationMode, type PrioritizationConfig } from "../utils/prioritization.ts";
 import { getPriorityOptions } from "../utils/priority-config.ts";
 import { getProjectValues, resolveProjectValues } from "../utils/project-config.ts";
 import { applyTaskFilters, createTaskSearchIndex } from "../utils/task-search.ts";
@@ -307,6 +308,7 @@ export async function renderBoardTui(
 		availableLabels?: string[];
 		availableMilestones?: string[];
 		priorities?: string[];
+		prioritization?: PrioritizationMode;
 		types?: string[];
 		projects?: string[];
 		onFilterChange?: (filters: {
@@ -408,12 +410,18 @@ export async function renderBoardTui(
 		};
 		const configuredTaskTypes = getTaskTypeValues(options?.types);
 		const configuredProjects = getProjectValues(options?.projects);
+		const prioritization: PrioritizationConfig = {
+			priorities: options?.priorities,
+			prioritization: options?.prioritization,
+		};
+		// RICE mode has no priority, so it has no priority filter either.
+		const usesPriority = getPrioritizationMode(prioritization) === "priority";
 		const sharedFilters = {
 			searchQuery: options?.filters?.searchQuery ?? "",
 			excludeStatus: [...(options?.filters?.excludeStatus ?? [])],
 			typeFilter: resolveTaskTypeValues(options?.filters?.typeFilter ?? [], configuredTaskTypes).values,
 			projectFilter: resolveProjectValues(options?.filters?.projectFilter ?? [], configuredProjects).values,
-			priorityFilter: options?.filters?.priorityFilter ?? "",
+			priorityFilter: usesPriority ? (options?.filters?.priorityFilter ?? "") : "",
 			labelFilter: [...(options?.filters?.labelFilter ?? [])],
 			labelMatch: options?.filters?.labelMatch ?? "any",
 			milestoneFilter: options?.filters?.milestoneFilter ?? "",
@@ -1001,7 +1009,7 @@ export async function renderBoardTui(
 				"search",
 				"type",
 				...(configuredProjects.length > 0 ? (["project"] as const) : []),
-				"priority",
+				...(usesPriority ? (["priority"] as const) : []),
 				"milestone",
 				"labels",
 			],
@@ -1085,7 +1093,10 @@ export async function renderBoardTui(
 					" {green-fg}MOVE MODE{/} | {cyan-fg}[←→]{/} Change Column | {cyan-fg}[↑↓]{/} Reorder | {cyan-fg}[Shift+↑↓]{/} Highlight | {cyan-fg}[Shift+M]{/} Select | {cyan-fg}[Enter]{/} Confirm | {cyan-fg}[Esc]{/} Cancel",
 				);
 			} else {
-				const base = getBoardFooterContent({ hasProjects: configuredProjects.length > 0 });
+				const base = getBoardFooterContent({
+					hasProjects: configuredProjects.length > 0,
+					hasPriority: usesPriority,
+				});
 				setFooterContent(hasActiveSharedFilters() ? `${base} | {yellow-fg}Filtered{/}` : base);
 			}
 			syncBoardAreaLayout();
@@ -1249,6 +1260,7 @@ export async function renderBoardTui(
 						statuses: configuredWorkflowStatuses,
 						types: options?.types,
 						priorities: options?.priorities,
+						prioritization: options?.prioritization,
 						projects: options?.projects,
 						persist: async (input) => {
 							if (options?.createTask) return options.createTask(input);
@@ -1287,10 +1299,12 @@ export async function renderBoardTui(
 			renderView(outcome.focusTaskId);
 		});
 
-		screen.key(["p", "P"], () => {
-			if (popupOpen || filterPopupOpen || modalOpen || moveOp) return;
-			void openFilterPicker("priority");
-		});
+		if (usesPriority) {
+			screen.key(["p", "P"], () => {
+				if (popupOpen || filterPopupOpen || modalOpen || moveOp) return;
+				void openFilterPicker("priority");
+			});
+		}
 
 		screen.key(["t", "T"], () => {
 			if (popupOpen || filterPopupOpen || modalOpen || moveOp) return;
@@ -1521,7 +1535,12 @@ export async function renderBoardTui(
 		const openTaskPopup = async (task: Task): Promise<void> => {
 			popupOpen = true;
 
-			const popup = await createTaskPopup(screen, task, resolveMilestoneLabel, options?.dateFormat, configuredProjects);
+			const popup = await createTaskPopup(screen, task, {
+				resolveMilestoneLabel,
+				dateFormat: options?.dateFormat,
+				configuredProjects,
+				prioritization,
+			});
 			if (!popup) {
 				popupOpen = false;
 				openPopup = null;
@@ -2037,7 +2056,9 @@ export async function renderBoardTui(
 
 		screen.key(["?"], async () => {
 			if (popupOpen || filterPopupOpen || modalOpen || moveOp) return;
-			await runWithModalGuard(() => openHelpPopup(screen, "board", { hasProjects: configuredProjects.length > 0 }));
+			await runWithModalGuard(() =>
+				openHelpPopup(screen, "board", { hasProjects: configuredProjects.length > 0, hasPriority: usesPriority }),
+			);
 		});
 
 		screen.key(["y", "Y"], async () => {
