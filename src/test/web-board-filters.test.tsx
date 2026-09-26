@@ -4,6 +4,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { BrowserRouter } from "react-router-dom";
 import type { Task } from "../types/index.ts";
+import type { PrioritizationConfig } from "../utils/prioritization.ts";
 import BoardPage from "../web/components/BoardPage.tsx";
 import { apiClient } from "../web/lib/api.ts";
 import { pinTimeZone } from "./pin-timezone.ts";
@@ -98,7 +99,7 @@ const renderBoardPage = (
 		tasks?: Task[];
 		statuses?: string[];
 		availableLabels?: string[];
-		availablePriorities?: string[];
+		prioritization?: PrioritizationConfig;
 		availableTypes?: string[];
 		dateFormat?: string;
 		onRefreshData?: () => Promise<void>;
@@ -119,7 +120,7 @@ const renderBoardPage = (
 					statuses={renderedStatuses}
 					milestones={[]}
 					availableLabels={options.availableLabels ?? ["bug", "docs", "enhancement"]}
-					availablePriorities={options.availablePriorities}
+					prioritization={options.prioritization}
 					availableTypes={options.availableTypes}
 					milestoneEntities={[]}
 					archivedMilestones={[]}
@@ -345,6 +346,30 @@ describe("Web board filters", () => {
 		expectVisibleTasks(container, ["Fix login bug"]);
 	});
 
+	it("shows RICE scores and no priority filter in RICE mode, dropping a priority from the URL", async () => {
+		const riceTasks = [
+			createTask({
+				id: "task-201",
+				title: "Scored work",
+				priority: "high",
+				rice: { reach: 500, impact: 2, confidence: 80, effort: 3 },
+			}),
+			createTask({ id: "task-202", title: "Unscored work", rice: { reach: 5 } }),
+		];
+		const container = renderBoardPage("http://localhost/board?priority=high", {
+			tasks: riceTasks,
+			prioritization: { prioritization: "rice" },
+		});
+		await act(async () => {});
+
+		const selects = Array.from(container.querySelectorAll("select"));
+		expect(selects.some((select) => select.options[0]?.textContent === "All priorities")).toBe(false);
+		expect(container.textContent).toContain("RICE 266.7");
+		expect(container.textContent).not.toContain("High");
+		expect(container.textContent).toContain("Unscored work");
+		expect(window.location.search).toBe("");
+	});
+
 	it("renders and filters configured custom priorities", async () => {
 		const customTasks = [
 			...tasks,
@@ -356,7 +381,7 @@ describe("Web board filters", () => {
 		];
 		const container = renderBoardPage(undefined, {
 			tasks: customTasks,
-			availablePriorities: ["Very High", "High", "Medium", "Low", "Very Low"],
+			prioritization: { priorities: ["Very High", "High", "Medium", "Low", "Very Low"] },
 		});
 
 		const prioritySelect = getSelectByFirstOption(container, "All priorities");
@@ -424,7 +449,7 @@ describe("Web board filters", () => {
 		];
 		const container = renderBoardPage("http://localhost/board?priority=VeRy%20HiGh", {
 			tasks: customTasks,
-			availablePriorities: ["Very High", "High", "Medium", "Low"],
+			prioritization: { priorities: ["Very High", "High", "Medium", "Low"] },
 		});
 
 		await waitFor(() => new URLSearchParams(window.location.search).get("priority") === "very high");

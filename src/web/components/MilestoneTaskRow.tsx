@@ -5,7 +5,9 @@ interface MilestoneTaskRowProps {
 	task: Task;
 	isDone: boolean;
 	statusBadgeClass: string;
-	priorityBadgeClass: string;
+	/** The priority label, or the RICE score in RICE mode; a dash shows when absent. */
+	rankLabel?: string;
+	rankBadgeClass: string;
 	onEditTask: (task: Task) => void;
 	onDragStart: (event: React.DragEvent, task: Task) => void;
 	onDragEnd: (event: React.DragEvent) => void;
@@ -26,7 +28,8 @@ const MilestoneTaskRow: React.FC<MilestoneTaskRowProps> = ({
 	task,
 	isDone,
 	statusBadgeClass,
-	priorityBadgeClass,
+	rankLabel,
+	rankBadgeClass,
 	onEditTask,
 	onDragStart,
 	onDragEnd,
@@ -61,10 +64,8 @@ const MilestoneTaskRow: React.FC<MilestoneTaskRowProps> = ({
 		</div>
 
 		<div className="w-20 flex justify-center">
-			{task.priority ? (
-				<span className={`text-[11px] px-2 py-0.5 rounded-full font-medium ${priorityBadgeClass}`}>
-					{task.priority}
-				</span>
+			{rankLabel ? (
+				<span className={`text-[11px] px-2 py-0.5 rounded-full font-medium ${rankBadgeClass}`}>{rankLabel}</span>
 			) : (
 				<span className="text-xs text-gray-300 dark:text-gray-600">—</span>
 			)}

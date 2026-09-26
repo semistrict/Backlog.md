@@ -3,7 +3,9 @@ import { Link } from "react-router-dom";
 import { apiClient } from "../lib/api";
 import { buildMilestoneBuckets, collectArchivedMilestoneKeys, isDoneStatus, milestoneKey } from "../utils/milestones";
 import { type Milestone, type MilestoneBucket, type Task } from "../../types";
+import { getPrioritizationMode, type PrioritizationConfig } from "../../utils/prioritization";
 import { createTaskSearchIndex } from "../../utils/task-search";
+import { getTaskRankLabel, RICE_PILL_CLASS } from "../utils/rank-label";
 import MilestoneTaskRow from "./MilestoneTaskRow";
 import Modal from "./Modal";
 import StoredDate from "./StoredDate";
@@ -45,6 +47,7 @@ interface MilestonesPageProps {
 	onEditTask: (task: Task) => void;
 	onRefreshData?: () => Promise<void>;
 	dateFormat?: string;
+	prioritization?: PrioritizationConfig;
 }
 
 const MilestonesPage: React.FC<MilestonesPageProps> = ({
@@ -55,7 +58,9 @@ const MilestonesPage: React.FC<MilestonesPageProps> = ({
 	onEditTask,
 	onRefreshData,
 	dateFormat,
+	prioritization,
 }) => {
+	const riceMode = getPrioritizationMode(prioritization) === "rice";
 	const [newMilestone, setNewMilestone] = useState("");
 	const [newMilestoneDueDate, setNewMilestoneDueDate] = useState("");
 	const [error, setError] = useState<string | null>(null);
@@ -626,7 +631,8 @@ const MilestonesPage: React.FC<MilestonesPageProps> = ({
 											task={task}
 											isDone={isDoneStatus(task.status)}
 											statusBadgeClass={getStatusBadgeClass(task.status)}
-											priorityBadgeClass={getPriorityBadgeClass(task.priority)}
+											rankLabel={getTaskRankLabel(task, prioritization)}
+											rankBadgeClass={riceMode ? RICE_PILL_CLASS : getPriorityBadgeClass(task.priority)}
 											onEditTask={onEditTask}
 											onDragStart={handleDragStart}
 											onDragEnd={handleDragEnd}
@@ -698,7 +704,7 @@ const MilestonesPage: React.FC<MilestonesPageProps> = ({
 											<div className="w-24">ID</div>
 											<div>Title</div>
 											<div className="text-center w-24">Status</div>
-											<div className="text-center w-20">Priority</div>
+											<div className="text-center w-20">{riceMode ? "RICE" : "Priority"}</div>
 										</div>
 
 										{/* Table rows */}
@@ -709,7 +715,8 @@ const MilestonesPage: React.FC<MilestonesPageProps> = ({
 													task={task}
 													isDone={isDoneStatus(task.status)}
 													statusBadgeClass={getStatusBadgeClass(task.status)}
-													priorityBadgeClass={getPriorityBadgeClass(task.priority)}
+													rankLabel={getTaskRankLabel(task, prioritization)}
+													rankBadgeClass={riceMode ? RICE_PILL_CLASS : getPriorityBadgeClass(task.priority)}
 													onEditTask={onEditTask}
 													onDragStart={handleDragStart}
 													onDragEnd={handleDragEnd}

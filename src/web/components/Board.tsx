@@ -5,6 +5,7 @@ import { buildLanes, DEFAULT_LANE_KEY, groupTasksByLaneAndStatus, type LaneMode,
 import { collectAvailableLabels, labelsToLower } from '../../utils/label-filter';
 import { collectArchivedMilestoneKeys, milestoneKey } from '../utils/milestones';
 import { getTerminalStatus } from '../../utils/terminal-status';
+import { getPrioritizationMode, type PrioritizationConfig } from '../../utils/prioritization';
 import { getPriorityOptions, normalizePriorityValue } from '../../utils/priority-config';
 import { getProjectValues, matchesProjectFilter } from '../../utils/project-config';
 import { getTaskTypeValues, matchesTaskTypeFilter } from '../../utils/task-type-config';
@@ -36,7 +37,7 @@ interface BoardProps {
   filterAssignee?: string;
   filterLabels?: string[];
   filterPriority?: string;
-  availablePriorities?: string[];
+  prioritization?: PrioritizationConfig;
   filterType?: string;
   availableTypes?: string[];
   filterProject?: string;
@@ -72,7 +73,7 @@ const Board: React.FC<BoardProps> = ({
   filterAssignee = '',
   filterLabels = [],
   filterPriority = '',
-  availablePriorities,
+  prioritization,
   filterType = '',
   availableTypes,
   filterProject = '',
@@ -98,13 +99,10 @@ const Board: React.FC<BoardProps> = ({
   const [collapsedLanes, setCollapsedLanes] = useState<Record<string, boolean>>({});
   const terminalStatus = getTerminalStatus(statuses);
   const priorityOptions = useMemo(
-    () => [{ label: 'All priorities', value: '' }, ...getPriorityOptions(availablePriorities)],
-    [availablePriorities]
+    () => [{ label: 'All priorities', value: '' }, ...getPriorityOptions(prioritization?.priorities)],
+    [prioritization]
   );
-  const prioritization = useMemo(
-    () => ({ priorities: availablePriorities }),
-    [availablePriorities]
-  );
+  const usesPriority = getPrioritizationMode(prioritization) === 'priority';
   const typeOptions = useMemo(() => getTaskTypeValues(availableTypes), [availableTypes]);
   const projectOptions = useMemo(() => getProjectValues(availableProjects), [availableProjects]);
   const archivedMilestoneIds = useMemo(
@@ -792,16 +790,18 @@ const Board: React.FC<BoardProps> = ({
                   </select>
                 )}
 
-                <select
-                  aria-label="Filter board by priority"
-                  value={filterPriority}
-                  onChange={e => onFiltersChange({ assignee: filterAssignee, labels: normalizedFilterLabels, priority: e.target.value, taskType: filterType, project: filterProject })}
-                  className={BOARD_FILTER_SELECT_CLASS}
-                >
-                  {priorityOptions.map(opt => (
-                    <option key={opt.value} value={opt.value}>{opt.label}</option>
-                  ))}
-                </select>
+                {usesPriority && (
+                  <select
+                    aria-label="Filter board by priority"
+                    value={filterPriority}
+                    onChange={e => onFiltersChange({ assignee: filterAssignee, labels: normalizedFilterLabels, priority: e.target.value, taskType: filterType, project: filterProject })}
+                    className={BOARD_FILTER_SELECT_CLASS}
+                  >
+                    {priorityOptions.map(opt => (
+                      <option key={opt.value} value={opt.value}>{opt.label}</option>
+                    ))}
+                  </select>
+                )}
 
                 {hasActiveFilters && (
                   <button

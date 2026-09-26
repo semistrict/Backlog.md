@@ -1,15 +1,18 @@
 import React, { useState, useEffect } from 'react';
 import { type Task } from '../../types';
 import StoredDate from './StoredDate';
-import { formatPriorityLabel } from '../../utils/priority-config';
+import { getPrioritizationMode, type PrioritizationConfig } from '../../utils/prioritization';
+import { getTaskRankLabel, RICE_PILL_CLASS } from '../utils/rank-label';
 
 interface DraftsListProps {
   onEditTask: (task: Task) => void;
   onNewDraft: () => void;
   dateFormat?: string;
+  prioritization?: PrioritizationConfig;
 }
 
-const DraftsList: React.FC<DraftsListProps> = ({ onEditTask, onNewDraft, dateFormat }) => {
+const DraftsList: React.FC<DraftsListProps> = ({ onEditTask, onNewDraft, dateFormat, prioritization }) => {
+  const riceMode = getPrioritizationMode(prioritization) === 'rice';
   const [drafts, setDrafts] = useState<Task[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -140,9 +143,12 @@ const DraftsList: React.FC<DraftsListProps> = ({ onEditTask, onNewDraft, dateFor
                   <div className="flex-1 cursor-pointer" onClick={() => onEditTask(draft)}>
                     <div className="flex items-center space-x-3 mb-2">
                       <h3 className="text-lg font-medium text-gray-900 dark:text-white">{draft.title}</h3>
-                      {draft.priority && (
-                        <span className={`px-2 py-1 text-xs font-medium rounded-circle ${getPriorityColor(draft.priority)}`}>
-                          {formatPriorityLabel(draft.priority)}
+                      {getTaskRankLabel(draft, prioritization) && (
+                        <span
+                          className={`px-2 py-1 text-xs font-medium rounded-circle ${riceMode ? RICE_PILL_CLASS : getPriorityColor(draft.priority)}`}
+                        >
+                          {riceMode ? 'RICE ' : ''}
+                          {getTaskRankLabel(draft, prioritization)}
                         </span>
                       )}
                     </div>

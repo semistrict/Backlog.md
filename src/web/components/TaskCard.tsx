@@ -1,6 +1,8 @@
 import React from 'react';
 import { type Task } from '../../types';
+import { formatTaskRankBadge, getPrioritizationMode, type PrioritizationConfig } from '../../utils/prioritization';
 import { formatPriorityLabel } from '../../utils/priority-config';
+import { RICE_PILL_CLASS } from '../utils/rank-label';
 import AcceptanceCriteriaProgress, { getAcceptanceCriteriaProgressCounts } from './AcceptanceCriteriaProgress';
 import StoredDate from './StoredDate';
 import ProjectBadge from './ProjectBadge';
@@ -16,6 +18,7 @@ interface TaskCardProps {
   laneId?: string;
   availableTypes?: string[];
   availableProjects?: string[];
+  prioritization?: PrioritizationConfig;
   dateFormat?: string;
   isSelected?: boolean;
   selectionCount?: number;
@@ -68,6 +71,7 @@ const TaskCard: React.FC<TaskCardProps> = ({
   laneId,
   availableTypes,
   availableProjects,
+  prioritization,
   dateFormat,
   isSelected = false,
   selectionCount = 0,
@@ -174,7 +178,14 @@ const TaskCard: React.FC<TaskCardProps> = ({
     }
   };
 
-  const priorityBadge = getPriorityBadge(task.priority);
+  // RICE mode shows the score instead of the priority, and colors no card edge.
+  const riceMode = getPrioritizationMode(prioritization) === 'rice';
+  const riceBadge = riceMode ? formatTaskRankBadge(task, prioritization) : undefined;
+  const priorityBadge = riceMode
+    ? riceBadge
+      ? { bg: RICE_PILL_CLASS, text: '', label: riceBadge }
+      : null
+    : getPriorityBadge(task.priority);
 
   return (
     <div className="relative">
@@ -196,7 +207,7 @@ const TaskCard: React.FC<TaskCardProps> = ({
           isFromOtherBranch 
             ? 'opacity-75 cursor-not-allowed border-dashed' 
             : 'cursor-pointer hover:shadow-md dark:hover:shadow-lg hover:border-stone-500 dark:hover:border-stone-400'
-        } ${getPriorityClass(task.priority)} ${
+        } ${getPriorityClass(riceMode ? undefined : task.priority)} ${
           isDragging || (isSelected && isSelectionDragging) ? 'opacity-50 transform rotate-2 scale-105' : ''
         } ${
           isSelected

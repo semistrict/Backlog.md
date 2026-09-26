@@ -230,10 +230,17 @@ const Statistics: React.FC<StatisticsProps> = ({
 			case 'medium': return 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-800 dark:text-yellow-200';
 			case 'low': return 'bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-200';
 			case 'none': return 'bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-200';
+			case 'scored': return 'bg-violet-100 dark:bg-violet-900/30 text-violet-800 dark:text-violet-200';
 			default: return 'bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-200';
 		}
 	};
-	const priorityBreakdown = [
+	// RICE mode counts tasks RICE can score instead of tasks per priority.
+	const riceMode = statistics.prioritization === 'rice';
+	const riceBreakdown = [
+		{ key: 'rice:scored', priority: 'scored', label: 'Scored', count: statistics.riceCounts.scored },
+		{ key: 'rice:unscored', priority: '', label: 'Unscored', count: statistics.riceCounts.unscored },
+	];
+	const priorityBreakdown = (riceMode ? riceBreakdown : [
 		...Object.entries(statistics.priorityCounts).map(([priority, count]) => ({
 			key: `priority:${priority}`,
 			priority,
@@ -246,7 +253,7 @@ const Statistics: React.FC<StatisticsProps> = ({
 			label: 'No Priority',
 			count: statistics.noPriorityCount,
 		},
-	].filter(({ count }) => count > 0);
+	]).filter(({ count }) => count > 0);
 
 	return (
 		<div className="max-w-7xl mx-auto p-6 space-y-8">
@@ -375,7 +382,9 @@ const Statistics: React.FC<StatisticsProps> = ({
 
 				{/* Priority Distribution */}
 				<div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-6">
-					<h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4">Priority Distribution</h3>
+					<h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4">
+						{riceMode ? 'RICE Distribution' : 'Priority Distribution'}
+					</h3>
 					<div className="space-y-4">
 						{priorityBreakdown.map(({ key, priority, label, count }) => (
 							<div key={key} className="flex items-center justify-between">

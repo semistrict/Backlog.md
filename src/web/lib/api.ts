@@ -6,6 +6,7 @@ import type {
 	Decision,
 	Document,
 	Milestone,
+	RiceInputsUpdate,
 	SearchPriorityFilter,
 	SearchResult,
 	SearchResultType,
@@ -71,10 +72,12 @@ export interface TaskVacancyResponse {
 	cleanedTaskIds: string[];
 }
 
-export type TaskUpdateRequest = Omit<Partial<Task>, "milestone" | "dueDate" | "project"> & {
+export type TaskUpdateRequest = Omit<Partial<Task>, "milestone" | "dueDate" | "project" | "rice"> & {
 	milestone?: string | null;
 	dueDate?: string | null;
 	project?: string | null;
+	/** Sets each given RICE input; null clears it. */
+	rice?: RiceInputsUpdate;
 	commentsAppend?: string[];
 	commentAuthor?: string;
 };

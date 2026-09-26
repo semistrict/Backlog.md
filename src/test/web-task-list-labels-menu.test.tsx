@@ -4,6 +4,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import type { Task } from "../types/index.ts";
+import type { PrioritizationConfig } from "../utils/prioritization.ts";
 import TaskList from "../web/components/TaskList.tsx";
 
 const createTask = (overrides: Partial<Task>): Task => ({
@@ -70,7 +71,7 @@ const renderTaskList = (
 		tasks?: Task[];
 		availableStatuses?: string[];
 		availableLabels?: string[];
-		availablePriorities?: string[];
+		prioritization?: PrioritizationConfig;
 	} = {},
 ): HTMLElement => {
 	setupDom();
@@ -88,7 +89,7 @@ const renderTaskList = (
 					availableStatuses={renderedStatuses}
 					availableLabels={renderedLabels}
 					availableMilestones={[]}
-					availablePriorities={options.availablePriorities}
+					prioritization={options.prioritization}
 					milestoneEntities={[]}
 					archivedMilestones={[]}
 					onEditTask={() => {}}
@@ -545,7 +546,7 @@ describe("TaskList labels filter menu", () => {
 
 		const container = renderTaskList(["/?priority=VeRy%20HiGh"], {
 			tasks: [],
-			availablePriorities: ["Very High", "High", "Medium", "Low"],
+			prioritization: { priorities: ["Very High", "High", "Medium", "Low"] },
 		});
 		await waitFor(() =>
 			fetchCalls.length === 1 &&

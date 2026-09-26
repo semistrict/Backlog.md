@@ -13,11 +13,11 @@ import { isTerminalStatus } from "../../utils/terminal-status.ts";
 import { collectArchivedMilestoneKeys, getMilestoneLabel, milestoneKey } from "../utils/milestones";
 import { parseStoredUtcDate } from "../utils/date-display";
 import {
-	formatPriorityLabel,
 	getPriorityOptions,
-	getPriorityRank,
 	resolvePriorityValue,
 } from "../../utils/priority-config.ts";
+import { compareTaskRank, getPrioritizationMode, type PrioritizationConfig } from "../../utils/prioritization.ts";
+import { getTaskRankLabel, RICE_PILL_CLASS } from "../utils/rank-label.ts";
 import CleanupModal from "./CleanupModal";
 import StoredDate from "./StoredDate";
 import AcceptanceCriteriaProgress from "./AcceptanceCriteriaProgress";
@@ -31,7 +31,7 @@ interface TaskListProps {
 	availableStatuses: string[];
 	availableLabels: string[];
 	availableMilestones: string[];
-	availablePriorities?: string[];
+	prioritization?: PrioritizationConfig;
 	milestoneEntities: Milestone[];
 	archivedMilestones: Milestone[];
 	onRefreshData?: () => Promise<void>;
@@ -117,7 +117,7 @@ const TaskList: React.FC<TaskListProps> = ({
 	availableStatuses,
 	availableLabels,
 	availableMilestones,
-	availablePriorities,
+	prioritization,
 	milestoneEntities,
 	archivedMilestones,
 	onRefreshData,
@@ -125,6 +125,10 @@ const TaskList: React.FC<TaskListProps> = ({
 	isLoading = false,
 }) => {
 	const [searchParams, setSearchParams] = useSearchParams();
+	// RICE mode has no priority filter, so a priority in the URL is dropped like any invalid one.
+	const riceMode = getPrioritizationMode(prioritization) === "rice";
+	const resolvePriorityParam = (value: string | null) =>
+		riceMode ? undefined : resolvePriorityValue(value, prioritization?.priorities);
 	const statusOptions = useMemo(
 		() => (availableStatuses.length > 0 ? availableStatuses : [...DEFAULT_STATUSES]),
 		[availableStatuses],
@@ -140,7 +144,7 @@ const TaskList: React.FC<TaskListProps> = ({
 	}, []);
 	const [excludedStatusFilter, setExcludedStatusFilter] = useState<string[]>(initialExcludeStatusParams);
 	const [priorityFilter, setPriorityFilter] = useState<string>(() =>
-		isLoading ? "" : (resolvePriorityValue(searchParams.get("priority"), availablePriorities) ?? ""),
+		isLoading ? "" : (resolvePriorityParam(searchParams.get("priority")) ?? ""),
 	);
 	const [milestoneFilter, setMilestoneFilter] = useState(() => searchParams.get("milestone") ?? "");
 	const initialLabelParams = useMemo(() => {
@@ -157,8 +161,8 @@ const TaskList: React.FC<TaskListProps> = ({
 	const [sortColumn, setSortColumn] = useState<TaskSortColumn>("id");
 	const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
 	const priorityOptions = useMemo(
-		() => [{ label: "All priorities", value: "" }, ...getPriorityOptions(availablePriorities)],
-		[availablePriorities],
+		() => [{ label: "All priorities", value: "" }, ...getPriorityOptions(prioritization?.priorities)],
+		[prioritization],
 	);
 	const tableHeaderScrollRef = useRef<HTMLDivElement | null>(null);
 	const tableBodyScrollRef = useRef<HTMLDivElement | null>(null);
@@ -326,7 +330,7 @@ const TaskList: React.FC<TaskListProps> = ({
 			.map((status) => status.trim())
 			.filter((status) => status.length > 0);
 		const rawParamPriority = searchParams.get("priority") ?? "";
-		const paramPriority = resolvePriorityValue(rawParamPriority, availablePriorities) ?? "";
+		const paramPriority = resolvePriorityParam(rawParamPriority) ?? "";
 		const paramMilestone = searchParams.get("milestone") ?? "";
 		const paramLabels = [...searchParams.getAll("label"), ...searchParams.getAll("labels")];
 		const labelsCsv = searchParams.get("labels");
@@ -363,7 +367,7 @@ const TaskList: React.FC<TaskListProps> = ({
 		if (!areEqualStringArrays(normalizedLabels, labelFilter)) {
 			setLabelFilter(normalizedLabels);
 		}
-	}, [availablePriorities, isLoading, searchParams, setSearchParams, statusOptions]);
+	}, [prioritization, isLoading, searchParams, setSearchParams, statusOptions]);
 
 	useEffect(() => {
 		if (!hasActiveFilters) {
@@ -546,6 +550,14 @@ const TaskList: React.FC<TaskListProps> = ({
 		}
 	};
 
+	/** The priority pill, or the RICE score pill in RICE mode; a dash when the task has neither. */
+	const renderRankCell = (task: Task) => {
+		const label = getTaskRankLabel(task, prioritization);
+		if (!label) return <span className="text-xs text-gray-300 dark:text-gray-600">—</span>;
+		const color = riceMode ? RICE_PILL_CLASS : getPriorityColor(task.priority);
+		return <span className={`inline-flex rounded-circle px-2 py-0.5 text-[11px] font-medium ${color}`}>{label}</span>;
+	};
+
 	const getPriorityColor = (priority?: string) => {
 		switch (priority?.toLowerCase()) {
 			case "high":
@@ -634,9 +646,8 @@ const TaskList: React.FC<TaskListProps> = ({
 					break;
 				}
 				case "priority": {
-					const rankA = getPriorityRank(a.priority, availablePriorities);
-					const rankB = getPriorityRank(b.priority, availablePriorities);
-					result = withDirection(rankA - rankB);
+					// compareTaskRank puts higher ranks first; ascending shows lower ranks first.
+					result = withDirection(-compareTaskRank(a, b, prioritization));
 					break;
 				}
 				case "ordinal": {
@@ -677,7 +688,7 @@ const TaskList: React.FC<TaskListProps> = ({
 			if (sortColumn === "ordinal") return compareTaskIdsAscending(a, b);
 			return compareTaskIdsDescending(a.id, b.id);
 		});
-	}, [availablePriorities, displayTasks, milestoneEntities, sortColumn, sortDirection]);
+	}, [prioritization, displayTasks, milestoneEntities, sortColumn, sortDirection]);
 
 	const currentCount = sortedDisplayTasks.length;
 
@@ -745,17 +756,19 @@ const TaskList: React.FC<TaskListProps> = ({
 							className="min-w-[210px]"
 						/>
 
-						<select
-							value={priorityFilter}
-							onChange={(event) => handlePriorityChange(event.target.value)}
-							className="min-w-[120px] h-10 py-2 px-3 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-stone-500 dark:focus:ring-stone-400 transition-colors duration-200"
-						>
-							{priorityOptions.map((option) => (
-								<option key={option.value || "all"} value={option.value}>
-									{option.label}
-								</option>
-							))}
-						</select>
+						{!riceMode && (
+							<select
+								value={priorityFilter}
+								onChange={(event) => handlePriorityChange(event.target.value)}
+								className="min-w-[120px] h-10 py-2 px-3 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-stone-500 dark:focus:ring-stone-400 transition-colors duration-200"
+							>
+								{priorityOptions.map((option) => (
+									<option key={option.value || "all"} value={option.value}>
+										{option.label}
+									</option>
+								))}
+							</select>
+						)}
 
 						<select
 							value={milestoneFilter}
@@ -843,7 +856,7 @@ const TaskList: React.FC<TaskListProps> = ({
 										{renderSortableHeader("ID", "id")}
 										{renderSortableHeader("Title", "title")}
 										{renderSortableHeader("Status", "status")}
-										{renderSortableHeader("Priority", "priority")}
+										{renderSortableHeader(riceMode ? "RICE" : "Priority", "priority")}
 										{renderSortableHeader("Ordinal", "ordinal")}
 										<th className="px-3 py-2">Labels</th>
 										<th className="px-3 py-2">Assignee</th>
@@ -918,17 +931,7 @@ const TaskList: React.FC<TaskListProps> = ({
 													{task.status}
 												</span>
 											</td>
-											<td className="px-3 py-2.5">
-												{task.priority ? (
-													<span
-														className={`inline-flex rounded-circle px-2 py-0.5 text-[11px] font-medium ${getPriorityColor(task.priority)}`}
-													>
-														{formatPriorityLabel(task.priority, availablePriorities)}
-													</span>
-												) : (
-													<span className="text-xs text-gray-300 dark:text-gray-600">—</span>
-												)}
-											</td>
+											<td className="px-3 py-2.5">{renderRankCell(task)}</td>
 											<td className="px-3 py-2.5 text-xs font-mono text-gray-500 dark:text-gray-400 whitespace-nowrap">
 												{task.ordinal !== undefined ? task.ordinal : <span className="text-gray-300 dark:text-gray-600">—</span>}
 											</td>

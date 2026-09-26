@@ -950,7 +950,7 @@ function AppContent() {
       loadError={loadError}
       hideEmptyColumns={config?.hideEmptyColumns ?? false}
       dateFormat={config?.dateFormat}
-      availablePriorities={config?.priorities}
+      prioritization={config ?? undefined}
       availableTypes={availableTypes}
       availableProjects={availableProjects}
     />
@@ -964,7 +964,7 @@ function AppContent() {
       availableStatuses={statuses}
       availableLabels={availableLabels}
       availableMilestones={milestones}
-      availablePriorities={config?.priorities}
+      prioritization={config ?? undefined}
       milestoneEntities={milestoneEntities}
       archivedMilestones={archivedMilestones}
       onRefreshData={refreshData}
@@ -1036,10 +1036,11 @@ function AppContent() {
                 onEditTask={handleEditTask}
                 onRefreshData={refreshMilestoneData}
                 dateFormat={config?.dateFormat}
+                prioritization={config ?? undefined}
               />
             }
           />
-            <Route path="drafts" element={<DraftsList onEditTask={openDraftModal} onNewDraft={handleNewDraft} dateFormat={config?.dateFormat} />} />
+            <Route path="drafts" element={<DraftsList onEditTask={openDraftModal} onNewDraft={handleNewDraft} dateFormat={config?.dateFormat} prioritization={config ?? undefined} />} />
             <Route path="documentation" element={<DocumentationDetail docs={docs} onRefreshData={refreshData} dateFormat={config?.dateFormat} />} />
             <Route path="documentation/:id" element={<DocumentationDetail docs={docs} onRefreshData={refreshData} dateFormat={config?.dateFormat} />} />
             <Route path="documentation/:id/:title" element={<DocumentationDetail docs={docs} onRefreshData={refreshData} dateFormat={config?.dateFormat} />} />
@@ -1081,7 +1082,7 @@ function AppContent() {
         availableTasks={tasks}
         onNavigateToTask={handleEditTask}
         availableMilestones={milestones}
-        availablePriorities={config?.priorities}
+        prioritization={config ?? undefined}
         availableTypes={availableTypes}
         availableProjects={availableProjects}
         milestoneEntities={milestoneEntities}

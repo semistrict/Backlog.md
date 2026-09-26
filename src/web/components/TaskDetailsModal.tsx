@@ -1,5 +1,13 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { isLocalEditableTask, type AcceptanceCriterion, type Milestone, type Task, type TaskComment } from "../../types";
+import {
+  isLocalEditableTask,
+  type AcceptanceCriterion,
+  type Milestone,
+  type RiceInputs,
+  type RiceInputsUpdate,
+  type Task,
+  type TaskComment,
+} from "../../types";
 import { type TaskDetail, taskDependencyGraph, taskReadiness } from "../../core/task-detail";
 import Modal from "./Modal";
 import { apiClient, NetworkError, readDemotionFailureCause, readMovedFailureState } from "../lib/api";
@@ -12,6 +20,13 @@ import DependencyInput from "./DependencyInput";
 import { DependencyGraphSection } from "./DependencyGraphSection";
 import StoredDate from "./StoredDate";
 import { getPriorityOptions } from "../../utils/priority-config";
+import {
+  applyRiceUpdate,
+  getPrioritizationMode,
+  hasRiceInputs,
+  type PrioritizationConfig,
+} from "../../utils/prioritization";
+import RiceInputsFields from "./RiceInputsFields";
 import { getProjectValues, resolveProjectValue } from "../../utils/project-config";
 import { getTaskTypeValues, resolveTaskTypeValue } from "../../utils/task-type-config";
 import { formatReadinessBlockers } from "../../utils/readiness";
@@ -33,7 +48,7 @@ interface Props {
   onNavigateToTask?: (task: Task) => void; // Opens another task, preserving close/back context
   isDraftMode?: boolean; // Whether creating a draft
   availableMilestones?: string[];
-  availablePriorities?: string[];
+  prioritization?: PrioritizationConfig;
   availableTypes?: string[];
   availableProjects?: string[];
   milestoneEntities?: Milestone[];
@@ -57,8 +72,9 @@ type TaskUpdatePayload = Omit<Partial<Task>, "dueDate" | "project"> & {
   commentAuthor?: string;
 };
 
-type InlineMetaUpdatePayload = Omit<Partial<Task>, "milestone"> & {
+type InlineMetaUpdatePayload = Omit<Partial<Task>, "milestone" | "rice"> & {
   milestone?: string | null;
+  rice?: RiceInputsUpdate;
 };
 
 type TaskDetailsFormState = {
@@ -74,6 +90,7 @@ type TaskDetailsFormState = {
   assignee: string[];
   labels: string[];
   priority: string;
+  rice: RiceInputs;
   taskType: string;
   project: string;
   dependencies: string[];
@@ -131,6 +148,7 @@ const buildTaskDetailsFormState = ({
   assignee: task?.assignee || createModeAssignee,
   labels: task?.labels || [],
   priority: task?.priority || "",
+  rice: task?.rice ?? {},
   taskType: task?.type || "",
   project: task?.project || "",
   dependencies: task?.dependencies || [],
@@ -187,7 +205,7 @@ export const TaskDetailsModal: React.FC<Props> = ({
   availableTasks = EMPTY_TASKS,
   onNavigateToTask,
   availableMilestones: _availableMilestones,
-  availablePriorities,
+  prioritization,
   availableTypes,
   availableProjects,
   milestoneEntities,
@@ -243,7 +261,9 @@ export const TaskDetailsModal: React.FC<Props> = ({
   );
   const initialDefinitionOfDone = task?.definitionOfDoneItems ?? (isCreateMode ? defaultDefinitionOfDone : []);
   const [definitionOfDone, setDefinitionOfDone] = useState<AcceptanceCriterion[]>(initialDefinitionOfDone);
-  const priorityOptions = useMemo(() => getPriorityOptions(availablePriorities), [availablePriorities]);
+  const priorityOptions = useMemo(() => getPriorityOptions(prioritization?.priorities), [prioritization]);
+  // RICE mode edits the four RICE inputs where priority mode edits a priority, and never sends the other.
+  const riceMode = getPrioritizationMode(prioritization) === "rice";
   const typeOptions = useMemo(() => getTaskTypeValues(availableTypes), [availableTypes]);
   const projectOptions = useMemo(() => getProjectValues(availableProjects), [availableProjects]);
   const resolveMilestoneToId = useCallback((value?: string | null): string => {
@@ -385,6 +405,7 @@ export const TaskDetailsModal: React.FC<Props> = ({
   const [assignee, setAssignee] = useState<string[]>(task?.assignee || createModeAssignee);
   const [labels, setLabels] = useState<string[]>(task?.labels || []);
   const [priority, setPriority] = useState<string>(task?.priority || "");
+  const [rice, setRice] = useState<RiceInputs>(task?.rice ?? {});
   const [taskType, setTaskType] = useState<string>(task?.type || "");
   const [project, setProject] = useState<string>(task?.project || "");
   const [typeUpdateError, setTypeUpdateError] = useState<string | null>(null);
@@ -577,6 +598,7 @@ export const TaskDetailsModal: React.FC<Props> = ({
         preserveDirtyRefreshValue(current, previousFormState.labels, nextFormState.labels, areJsonEqual),
       );
       setPriority((current) => preserveDirtyRefreshValue(current, previousFormState.priority, nextFormState.priority));
+      setRice((current) => preserveDirtyRefreshValue(current, previousFormState.rice, nextFormState.rice, areJsonEqual));
       setTaskType((current) => preserveDirtyRefreshValue(current, previousFormState.taskType, nextFormState.taskType));
       setProject((current) => preserveDirtyRefreshValue(current, previousFormState.project, nextFormState.project));
       setDependencies((current) =>
@@ -622,6 +644,7 @@ export const TaskDetailsModal: React.FC<Props> = ({
     setAssignee(nextFormState.assignee);
     setLabels(nextFormState.labels);
     setPriority(nextFormState.priority);
+    setRice(nextFormState.rice);
     setTaskType(nextFormState.taskType);
     setProject(nextFormState.project);
     setDependencies(nextFormState.dependencies);
@@ -650,6 +673,7 @@ export const TaskDetailsModal: React.FC<Props> = ({
     (title.trim() !== "" ||
       taskType.trim() !== "" ||
       priority.trim() !== "" ||
+      hasRiceInputs(rice) ||
       project.trim() !== "" ||
       milestone.trim() !== "" ||
       dueDate.trim() !== "" ||
@@ -825,7 +849,7 @@ export const TaskDetailsModal: React.FC<Props> = ({
         // field. On edit an explicit empty list clears the assignees.
         ...(isCreateMode && assignee.length === 0 && createModeAssignee.length === 0 ? {} : { assignee }),
         labels,
-        priority: priority === "" ? undefined : priority,
+        ...(riceMode ? {} : { priority: priority === "" ? undefined : priority }),
         dependencies,
         milestone: milestone.trim().length > 0 ? milestone.trim() : undefined,
         dueDate: dueDate.trim().length > 0 ? dueDate.trim() : isCreateMode ? undefined : null,
@@ -838,6 +862,8 @@ export const TaskDetailsModal: React.FC<Props> = ({
       if (isCreateMode) {
         taskData.type = taskType;
         taskData.project = project.trim().length > 0 ? project.trim() : undefined;
+        // On edit the RICE fields persist immediately, like the other sidebar selects.
+        if (riceMode && hasRiceInputs(rice)) taskData.rice = rice;
       }
 
       if (isCreateMode && onSubmit) {
@@ -919,6 +945,14 @@ export const TaskDetailsModal: React.FC<Props> = ({
     if (updates.assignee !== undefined) setAssignee(updates.assignee as string[]);
     if (updates.labels !== undefined) setLabels(updates.labels as string[]);
     if (updates.priority !== undefined) setPriority(String(updates.priority));
+    if (updates.rice !== undefined) {
+      try {
+        setRice(applyRiceUpdate(rice, updates.rice) ?? {});
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err));
+        return;
+      }
+    }
     if (updates.type !== undefined) setTaskType(String(updates.type));
     if (updates.project !== undefined) setProject(String(updates.project));
     if (updates.dependencies !== undefined) setDependencies(updates.dependencies as string[]);
@@ -1835,7 +1869,17 @@ export const TaskDetailsModal: React.FC<Props> = ({
             />
           </div>
 
-          {/* Priority */}
+          {/* Priority, or the RICE inputs in RICE mode */}
+          {riceMode ? (
+            <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-3">
+              <SectionHeader title="RICE" />
+              <RiceInputsFields
+                rice={rice}
+                disabled={isFromOtherBranch}
+                onChange={(update) => handleInlineMetaUpdate({ rice: update })}
+              />
+            </div>
+          ) : (
           <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-3">
             <SectionHeader title="Priority" />
             <select
@@ -1852,6 +1896,7 @@ export const TaskDetailsModal: React.FC<Props> = ({
               ))}
             </select>
           </div>
+          )}
 
           {/* Project */}
           {projectOptions.length > 0 && (

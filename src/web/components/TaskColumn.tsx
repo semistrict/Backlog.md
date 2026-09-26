@@ -1,6 +1,6 @@
 import React from 'react';
 import { type Task } from '../../types';
-import type { PrioritizationConfig } from '../../utils/prioritization';
+import { getPrioritizationMode, type PrioritizationConfig } from '../../utils/prioritization';
 import { compareTaskIds, sortByPriority } from '../../utils/task-sorting';
 import type { ReorderTaskPayload } from '../lib/api';
 import { parseStoredUtcDate } from '../utils/date-display';
@@ -291,7 +291,7 @@ const TaskColumn: React.FC<TaskColumnProps> = ({
                   <svg className="w-4 h-4 text-gray-500 dark:text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 4h13M3 8h9m-9 4h6m4 0l4-4m0 0l4 4m-4-4v12" />
                   </svg>
-                  Sort by Priority
+                  {getPrioritizationMode(prioritization) === 'rice' ? 'Sort by RICE score' : 'Sort by Priority'}
                 </button>
                 <button
                   type="button"
@@ -403,6 +403,7 @@ const TaskColumn: React.FC<TaskColumnProps> = ({
               laneId={laneId}
               availableTypes={availableTypes}
               availableProjects={availableProjects}
+              prioritization={prioritization}
               dateFormat={dateFormat}
             />
             

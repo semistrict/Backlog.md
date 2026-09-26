@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import Board from './Board';
 import { type Milestone, type Task } from '../../types';
+import { getPrioritizationMode, type PrioritizationConfig } from '../../utils/prioritization';
 import { resolvePriorityValue } from '../../utils/priority-config';
 import { resolveProjectValue } from '../../utils/project-config';
 import { resolveTaskTypeValue } from '../../utils/task-type-config';
@@ -23,7 +24,7 @@ interface BoardPageProps {
 	loadError?: Error | null;
 	hideEmptyColumns?: boolean;
 	dateFormat?: string;
-	availablePriorities?: string[];
+	prioritization?: PrioritizationConfig;
 	availableTypes?: string[];
 	availableProjects?: string[];
 }
@@ -44,7 +45,7 @@ export default function BoardPage({
 	loadError,
 	hideEmptyColumns,
 	dateFormat,
-	availablePriorities,
+	prioritization,
 	availableTypes,
 	availableProjects,
 }: BoardPageProps) {
@@ -146,7 +147,11 @@ export default function BoardPage({
 		...searchParams.getAll('labels').flatMap((value) => value.split(',')),
 	].map((label) => label.trim()).filter((label) => label.length > 0);
 	const rawFilterPriority = searchParams.get('priority') ?? '';
-	const filterPriority = resolvePriorityValue(rawFilterPriority, availablePriorities) ?? '';
+	// RICE mode has no priority filter, so a priority in the URL is dropped like any invalid one.
+	const filterPriority =
+		getPrioritizationMode(prioritization) === 'priority'
+			? (resolvePriorityValue(rawFilterPriority, prioritization?.priorities) ?? '')
+			: '';
 	const rawFilterType = searchParams.get('type') ?? '';
 	const filterType = resolveTaskTypeValue(rawFilterType, availableTypes) ?? '';
 	const rawFilterProject = searchParams.get('project') ?? '';
@@ -211,7 +216,7 @@ export default function BoardPage({
 				filterAssignee={filterAssignee}
 				filterLabels={filterLabels}
 				filterPriority={filterPriority}
-				availablePriorities={availablePriorities}
+				prioritization={prioritization}
 				filterType={filterType}
 				availableTypes={availableTypes}
 				filterProject={filterProject}

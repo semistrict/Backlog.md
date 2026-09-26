@@ -14,6 +14,7 @@ import { MilestoneHandlers } from "../mcp/tools/milestones/handlers.ts";
 import {
 	DOCUMENT_TYPE_VALUES,
 	type Document,
+	type RiceInputsUpdate,
 	type SearchPriorityFilter,
 	type SearchResultType,
 	type Task,
@@ -25,7 +26,8 @@ import { normalizeDueDate } from "../utils/due-date.ts";
 import { isAmbiguousIdError } from "../utils/entity-id.ts";
 import { resolveMilestoneInputForStorage } from "../utils/milestone-storage.ts";
 import { DRAFT_PREFIX, extractAnyPrefix, getTaskPrefixError } from "../utils/prefix-config.ts";
-import { formatValidPriorityValues, resolvePriorityValue } from "../utils/priority-config.ts";
+import { pickRiceInputs, resolveActivePriorityValue } from "../utils/prioritization.ts";
+import { formatValidPriorityValues } from "../utils/priority-config.ts";
 import {
 	formatValidProjectValues,
 	getProjectValues,
@@ -41,6 +43,13 @@ import { getVersion } from "../utils/version.ts";
 const PREFIX_PATTERN = /^[a-zA-Z]+-/i;
 const DEFAULT_PREFIX = "task-";
 const DOCUMENT_TYPES = new Set<Document["type"]>(DOCUMENT_TYPE_VALUES);
+
+/** The RICE inputs a create or update body carries as `rice: { reach, impact, confidence, effort }`; core validates them. */
+function readRicePayload(value: unknown): RiceInputsUpdate | undefined {
+	return value && typeof value === "object" && !Array.isArray(value)
+		? pickRiceInputs(value as RiceInputsUpdate)
+		: undefined;
+}
 
 /**
  * The task routes serve drafts too, so only an explicit DRAFT- id addresses a draft.
@@ -746,7 +755,12 @@ export class BacklogServer {
 		const config = await this.core.filesystem.loadConfig();
 		let priority: string | undefined;
 		if (priorityParam) {
-			const normalizedPriority = resolvePriorityValue(priorityParam, config);
+			let normalizedPriority: string | undefined;
+			try {
+				normalizedPriority = resolveActivePriorityValue(priorityParam, config);
+			} catch (error) {
+				return Response.json({ error: (error as Error).message }, { status: 400 });
+			}
 			if (!normalizedPriority) {
 				return Response.json(
 					{ error: `Invalid priority filter. Valid values are: ${formatValidPriorityValues(config)}` },
@@ -898,7 +912,12 @@ export class BacklogServer {
 
 			if (priorityParamsRaw.length > 0) {
 				const config = await this.core.filesystem.loadConfig();
-				const normalizedPriorities = priorityParamsRaw.map((value) => resolvePriorityValue(value, config));
+				let normalizedPriorities: Array<string | undefined>;
+				try {
+					normalizedPriorities = priorityParamsRaw.map((value) => resolveActivePriorityValue(value, config));
+				} catch (error) {
+					return Response.json({ error: (error as Error).message }, { status: 400 });
+				}
 				const invalidPriority = priorityParamsRaw[normalizedPriorities.findIndex((value) => !value)];
 				if (invalidPriority) {
 					return Response.json(
@@ -1004,6 +1023,7 @@ export class BacklogServer {
 				description: payload.description,
 				status: payload.status,
 				priority: payload.priority,
+				rice: readRicePayload(payload.rice),
 				type: typeof payload.type === "string" ? payload.type : undefined,
 				project: typeof payload.project === "string" ? payload.project : undefined,
 				milestone,
@@ -1097,6 +1117,11 @@ export class BacklogServer {
 
 		if ("priority" in updates && typeof updates.priority === "string") {
 			updateInput.priority = updates.priority;
+		}
+
+		const rice = readRicePayload(updates.rice);
+		if (rice) {
+			updateInput.rice = rice;
 		}
 
 		if ("type" in updates && typeof updates.type === "string") {
