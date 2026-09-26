@@ -194,12 +194,12 @@ export function formatRiceScore(score: number): string {
 	return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1);
 }
 
-export function formatRiceInput(key: RiceInputKey, value: number): string {
+function formatRiceInput(key: RiceInputKey, value: number): string {
 	return key === "confidence" ? `${value}%` : String(value);
 }
 
 /** "266.7 (Reach 500, Impact 2, Confidence 80%, Effort 3)", "unscored (Reach 500)", or nothing without inputs. */
-export function formatRiceSummary(rice: RiceInputs | undefined): string | undefined {
+function formatRiceSummary(rice: RiceInputs | undefined): string | undefined {
 	if (!hasRiceInputs(rice)) return undefined;
 	const score = computeRiceScore(rice);
 	const inputs = RICE_INPUT_KEYS.flatMap((key) => {
@@ -231,7 +231,7 @@ export function formatTaskRankBadge(task: RankedTask, config?: PrioritizationCon
 }
 
 /** Higher ranks first. Unranked tasks rank below every ranked task in either mode. */
-export function getTaskRank(task: RankedTask, config?: PrioritizationConfig | null): number {
+function getTaskRank(task: RankedTask, config?: PrioritizationConfig | null): number {
 	if (getPrioritizationMode(config) === "rice") {
 		return computeRiceScore(task.rice) ?? Number.NEGATIVE_INFINITY;
 	}
