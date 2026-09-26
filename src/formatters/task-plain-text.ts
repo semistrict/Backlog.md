@@ -3,12 +3,14 @@ import type { Task } from "../types/index.ts";
 import type { ChecklistItem } from "../ui/checklist.ts";
 import { transformCodePathsPlain } from "../ui/code-path.ts";
 import { formatStatusWithIcon } from "../ui/status-icon.ts";
-import { formatPriorityLabel } from "../utils/priority-config.ts";
+import { describeTaskRank, type PrioritizationConfig } from "../utils/prioritization.ts";
 import { sortByTaskId } from "../utils/task-sorting.ts";
 import { formatUtcDateForDisplay, type UtcDateDisplayOptions } from "../utils/utc-date-display.ts";
 import { formatDependencyGraphLines } from "./dependency-graph-text.ts";
 
 export type TaskPlainTextOptions = {
+	/** Decides whether the task shows its priority or its RICE inputs and score. */
+	prioritization: PrioritizationConfig | null;
 	filePathOverride?: string;
 };
 
@@ -45,11 +47,6 @@ export function formatAcceptanceCriteriaLines(items: ChecklistItem[]): string[] 
 	});
 }
 
-function formatPriority(priority?: string): string | null {
-	if (!priority) return null;
-	return formatPriorityLabel(priority);
-}
-
 function formatAssignees(assignee?: string[]): string | null {
 	if (!assignee || assignee.length === 0) return null;
 	return assignee.map((a) => (a.startsWith("@") ? a : `@${a}`)).join(", ");
@@ -82,7 +79,7 @@ function formatDependencyGraphBlock(task: TaskDetail): string[] {
 	return ["", "Dependency Graph:", "-".repeat(50), ...graphLines];
 }
 
-export function formatTaskPlainText(task: TaskDetail, options: TaskPlainTextOptions = {}): string {
+export function formatTaskPlainText(task: TaskDetail, options: TaskPlainTextOptions): string {
 	const lines: string[] = [];
 	const filePath = options.filePathOverride ?? task.filePath;
 
@@ -96,9 +93,9 @@ export function formatTaskPlainText(task: TaskDetail, options: TaskPlainTextOpti
 	lines.push("");
 	lines.push(`Status: ${formatStatusWithIcon(task.status)}`);
 
-	const priorityLabel = formatPriority(task.priority);
-	if (priorityLabel) {
-		lines.push(`Priority: ${priorityLabel}`);
+	const rank = describeTaskRank(task, options.prioritization);
+	if (rank) {
+		lines.push(`${rank.label}: ${rank.value}`);
 	}
 	if (task.type) {
 		lines.push(`Type: ${task.type}`);

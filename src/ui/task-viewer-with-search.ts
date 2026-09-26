@@ -291,7 +291,9 @@ export async function viewTaskEnhanced(
 	} = {},
 ): Promise<void> {
 	if (output.isTTY === false) {
-		console.log(formatTaskPlainText(await loadTaskDetail(options.core ?? (await createRuntimeCore()), task)));
+		const core = options.core ?? (await createRuntimeCore());
+		const [detail, prioritization] = await Promise.all([loadTaskDetail(core, task), core.filesystem.loadConfig()]);
+		console.log(formatTaskPlainText(detail, { prioritization }));
 		return;
 	}
 

@@ -485,6 +485,7 @@ backlog search --modified-file src/server/api.ts --plain
 
 **Key points:**
 - Priority values are project-configured (`priorities` in config) and are accepted case-insensitively. Use CLI/MCP help or `backlog config get priorities` when you need the exact list.
+- Projects with `prioritization: rice` rank tasks by RICE score instead of priority; priority filters fail there. Set inputs with `--reach`, `--impact`, `--confidence` and `--effort`.
 - Uses fuzzy matching - finds "authentication" when searching "auth"
 - Searches task titles, descriptions, and content
 - Also searches `modified_files`; `--modified-file` applies a case-insensitive path substring filter

@@ -44,6 +44,7 @@ Humans and agents can run `backlog instructions` for workflow guides and `backlo
 | Create with status | `backlog task create "Feature" -s "In Progress"`    |
 | Create with labels | `backlog task create "Feature" -l auth,backend`     |
 | Create with priority | `backlog task create "Feature" --priority high`     |
+| Create with RICE inputs | `backlog task create "Feature" --reach 500 --impact 2 --confidence 80 --effort 3` (projects with `prioritization: rice`) |
 | Create with due date | `backlog task create "Feature" --due-date 2026-08-10` |
 | Create with plan | `backlog task create "Feature" --plan "1. Research\n2. Implement"`     |
 | Create with AC | `backlog task create "Feature" --ac "Must work,Must be tested"` |
@@ -67,6 +68,7 @@ Humans and agents can run `backlog instructions` for workflow guides and `backlo
 | View (AI mode) | `backlog task 7 --plain`                           |
 | View as JSON | `backlog task 7 --json` |
 | Edit        | `backlog task edit 7 -a @sara -l auth,backend`       |
+| Edit RICE inputs | `backlog task edit 7 --effort 2 --reach ""` (sets effort, clears reach; projects with `prioritization: rice`) |
 | Add plan    | `backlog task edit 7 --plan "Implementation approach"`    |
 | Add AC      | `backlog task edit 7 --ac "New criterion" --ac "Another one"` |
 | Add DoD     | `backlog task edit 7 --dod "Ship notes"` |
@@ -135,7 +137,7 @@ Each successful response is one pretty-printed JSON document followed by a newli
 | `task view <id> --json` and `task <id> --json` | `{ "schemaVersion": 1, "kind": "task-view", "task": {...} }` |
 | `search [query] --json` | `{ "schemaVersion": 1, "kind": "search", "results": [...] }` |
 
-Task list and task search results use these compact fields: `id`, `title`, `status`, `type`, `priority`, `project`, `assignees`, `reporter`, `labels`, `milestone`, `parentTaskId`, `acceptanceCriteriaCompleted`, `acceptanceCriteriaCount`, `references`, `modifiedFiles`, `ordinal`, `createdAt`, `updatedAt`, `dueDate`, and `isReady`. `acceptanceCriteriaCompleted` is the number of checked acceptance criteria and `acceptanceCriteriaCount` is the total; both are `0` when the task has no acceptance criteria. `project` reports the task's `project:` frontmatter and is `null` when the task has none. Setting or filtering by it requires a `projects:` list in the project config. `isReady` is derived from the whole visible corpus at read time and never stored: it is `true` when the task is unfinished and every dependency it names resolved to a completed task, and `false` for a finished task or one whose dependencies are unfinished, unknown, or ambiguous. It is the same verdict `task list --ready` filters on.
+Task list and task search results use these compact fields: `id`, `title`, `status`, `type`, `priority`, `rice`, `project`, `assignees`, `reporter`, `labels`, `milestone`, `parentTaskId`, `acceptanceCriteriaCompleted`, `acceptanceCriteriaCount`, `references`, `modifiedFiles`, `ordinal`, `createdAt`, `updatedAt`, `dueDate`, and `isReady`. `acceptanceCriteriaCompleted` is the number of checked acceptance criteria and `acceptanceCriteriaCount` is the total; both are `0` when the task has no acceptance criteria. `priority` is `null` when the project's `prioritization` is `rice`; `rice` is `null` otherwise, and in RICE mode it is an object with `reach`, `impact`, `confidence`, `effort` (each `null` when unset) and `score` (`reach × impact × confidence% ÷ effort`, `null` until all four inputs are set). `project` reports the task's `project:` frontmatter and is `null` when the task has none. Setting or filtering by it requires a `projects:` list in the project config. `isReady` is derived from the whole visible corpus at read time and never stored: it is `true` when the task is unfinished and every dependency it names resolved to a completed task, and `false` for a finished task or one whose dependencies are unfinished, unknown, or ambiguous. It is the same verdict `task list --ready` filters on.
 
 Task view includes the same progress counts alongside the full checklist and adds `path`, `description`, `dependencies`, `dependencyGraph`, `readiness`, `references`, `documentation`, `modifiedFiles`, `subtasks`, `acceptanceCriteria`, `definitionOfDone`, `implementationPlan`, `implementationNotes`, `comments`, and `finalSummary`. `path` is relative to the project root. Checklist entries contain `index`, `text`, and `checked`. Comment entries contain `index`, `body`, `createdAt`, and `author`.
 

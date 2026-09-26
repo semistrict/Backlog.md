@@ -65,6 +65,7 @@ Include:
 - References or documentation when they are needed for implementation.
 - Dependencies when work must happen in order.
 - An assignee with `-a` when the task has a known owner; omitting it applies the project's configured `defaultAssignee` when one is set, and `-a ""` leaves the task unassigned instead.
+- In projects whose `prioritization` is `rice` (check with `backlog config get prioritization`), RICE inputs you can estimate: `--reach`, `--impact` (3, 2, 1, 0.5, 0.25), `--confidence` (100, 80, 50) and `--effort`. These projects do not use `--priority`.
 
 For future work, do **not** add an implementation plan or speculative code approach during task creation. Creation
 captures the durable intent, context, scope, acceptance criteria, references, and dependencies. The worker researches

@@ -1,5 +1,6 @@
 import { type Core, createRuntimeCore } from "../core/backlog.ts";
 import type { BacklogConfig } from "../types/index.ts";
+import { getPrioritizationMode, RICE_CONFIDENCE_VALUES, RICE_IMPACT_VALUES } from "../utils/prioritization.ts";
 import { getPriorityValues } from "../utils/priority-config.ts";
 import { getProjectValues } from "../utils/project-config.ts";
 import { getTaskTypeValues } from "../utils/task-type-config.ts";
@@ -47,13 +48,24 @@ export async function getStatuses(): Promise<string[]> {
 }
 
 /**
- * Get priority values
+ * Get priority values; none in RICE mode, where priority is not used
  */
 export async function getPriorities(): Promise<string[]> {
 	return await withCore(async (core) => {
 		const config: BacklogConfig | null = await core.filesystem.loadConfig();
-		return getPriorityValues(config);
+		return getPrioritizationMode(config) === "rice" ? [] : getPriorityValues(config);
 	}, getPriorityValues());
+}
+
+/**
+ * Get the fixed RICE impact or confidence scale; none outside RICE mode
+ */
+export async function getRiceScaleValues(key: "impact" | "confidence"): Promise<string[]> {
+	return await withCore(async (core) => {
+		const config: BacklogConfig | null = await core.filesystem.loadConfig();
+		if (getPrioritizationMode(config) !== "rice") return [];
+		return (key === "impact" ? RICE_IMPACT_VALUES : RICE_CONFIDENCE_VALUES).map(String);
+	}, []);
 }
 
 /**

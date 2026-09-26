@@ -14,6 +14,7 @@ For getting started and the interactive wizard overview, see [README.md](README.
 | Enable cross-branch check | `backlog config set checkActiveBranches true` |
 | Set active branch days | `backlog config set activeBranchDays 30` |
 | Set default assignees | `backlog config set defaultAssignee "@alice,@bob"` |
+| Rank tasks by RICE | `backlog config set prioritization rice` |
 
 Running `backlog config` with no arguments launches the interactive advanced wizard, including guided Definition of Done defaults editing (add/remove/reorder/clear).
 
@@ -26,6 +27,7 @@ Running `backlog config` with no arguments launches the interactive advanced wiz
 | `definition_of_done` | Default DoD checklist items for new tasks | `(not set)` |
 | `statuses`        | Board columns      | `[To Do, In Progress, Done]`  |
 | `priorities`      | Ordered task priority labels | `[High, Medium, Low]` |
+| `prioritization`  | How tasks are ranked: `priority` or `rice` | `priority` |
 | `projects`        | Allowed project values for monorepo backlogs | `(not set)` |
 | `dateFormat`      | Display-only date format | `yyyy-mm-dd`            |
 | `includeDatetimeInDates` | Add time to new dates | `true`              |
@@ -58,6 +60,8 @@ Running `backlog config` with no arguments launches the interactive advanced wiz
 > **Default Assignee**: `defaultAssignee` is a list, so `backlog config set defaultAssignee "@alice,@bob"` stores both names. Every create surface (CLI `task create` and `draft create`, the creation wizard, TUI, Web, MCP) applies it when no assignee is supplied. An explicit assignee replaces the default entirely instead of merging with it, and setting the value to an empty string clears the default so new tasks start unassigned. To keep a single task unassigned while the default stays configured, pass an explicit empty assignee: `backlog task create "Title" -a ""`. The same value clears existing assignees on edit: `backlog task edit BACK-1 -a ""` (MCP `task_create`/`task_edit` use an empty `assignee` array). When editing `config.yml` by hand, quote the names (`default_assignee: ["@alice"]`) because `@` starts a reserved YAML character; a value YAML cannot read is ignored rather than guessed at.
 
 > **Priority Values**: Set `priorities` to an ordered list of labels such as `["Very High", "High", "Medium", "Low", "Very Low"]`. The first value sorts highest. CLI, MCP, and Web inputs accept configured values case-insensitively and store normalized lowercase values in task frontmatter.
+
+> **RICE Prioritization**: `backlog config set prioritization rice` replaces priority with RICE scoring on every surface. Each task stores up to four inputs under a `rice:` map in its frontmatter: `reach` (a number of 0 or more, such as people or events per quarter), `impact` (3 massive, 2 high, 1 medium, 0.5 low, 0.25 minimal), `confidence` (100, 80 or 50 percent) and `effort` (a number greater than 0, such as person-months). The score is `reach × impact × confidence% ÷ effort`; it is computed when read and never stored, and a task has no score until all four inputs are set. Set inputs with `backlog task create "Title" --reach 500 --impact 2 --confidence 80 --effort 3`, change one with `backlog task edit <id> --effort 2`, and clear one with an empty value (`--reach ""`). Everything that orders by priority orders by score instead, highest first with unscored tasks last: `task list`, `task list --sort priority`, and the board's sort-by-priority action. In RICE mode `--priority` and priority filters fail with an explanation; in the default `priority` mode the RICE flags do. Switching modes never rewrites task files, so priorities or RICE inputs already recorded stay in place and reappear if you switch back. `--json` output reports `priority: null` and a `rice` object with the inputs and `score` in RICE mode, and `rice: null` in priority mode.
 
 > **Project Values**: `projects` tags each task with one project in a monorepo-style backlog. It has no default, so the field stays inert until you set it — until then no surface offers it, and `--project` fails with a message naming the config file. Set it by editing the project config file directly (like `statuses`, `labels`, `types`, and `priorities`, it cannot be changed with `backlog config set`):
 >

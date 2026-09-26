@@ -2,8 +2,23 @@ import { TextPrompt } from "@clack/core";
 import * as clack from "@clack/prompts";
 import picocolors from "picocolors";
 import { DEFAULT_STATUSES } from "../constants/index.ts";
-import type { AcceptanceCriterion, Task, TaskCreateInput, TaskUpdateInput } from "../types/index.ts";
+import type {
+	AcceptanceCriterion,
+	PrioritizationMode,
+	RiceInputKey,
+	Task,
+	TaskCreateInput,
+	TaskUpdateInput,
+} from "../types/index.ts";
 import { normalizeDueDate } from "../utils/due-date.ts";
+import {
+	formatAllowedRiceInput,
+	parseRiceInputs,
+	RICE_CONFIDENCE_OPTIONS,
+	RICE_IMPACT_OPTIONS,
+	RICE_INPUT_KEYS,
+	requireRiceInput,
+} from "../utils/prioritization.ts";
 import { getPriorityOptions, normalizePriorityValue } from "../utils/priority-config.ts";
 import { getProjectValues, resolveProjectValue } from "../utils/project-config.ts";
 import { normalizeStringList } from "../utils/task-builders.ts";
@@ -14,6 +29,10 @@ interface TaskWizardValues {
 	description: string;
 	status: string;
 	priority: string;
+	reach: string;
+	impact: string;
+	confidence: string;
+	effort: string;
 	type: string;
 	project: string;
 	dueDate: string;
@@ -71,6 +90,8 @@ interface ChecklistEntry {
 interface WizardOptions {
 	statuses: string[];
 	priorities?: string[];
+	/** In RICE mode the wizard asks for the four RICE inputs instead of a priority. */
+	prioritization?: PrioritizationMode;
 	types?: string[];
 	projects?: string[];
 	promptImpl?: TaskWizardPromptRunner;
@@ -202,6 +223,69 @@ function buildPriorityPromptValues(
 		options: [{ label: `${initialPriority} (current)`, value: normalizedInitial }, ...options],
 		initial: normalizedInitial,
 	};
+}
+
+/** Choices for a fixed RICE scale, with "None" first and a stored off-scale value kept as current. */
+function buildRiceScalePromptOptions(
+	scale: ReadonlyArray<{ value: number; label: string }>,
+	initial: string,
+	unit = "",
+): PromptChoice[] {
+	const options: PromptChoice[] = [
+		{ label: "None", value: "" },
+		...scale.map((step) => ({ label: `${step.value}${unit}`, value: String(step.value), hint: step.label })),
+	];
+	if (initial && !options.some((option) => option.value === initial)) {
+		return [{ label: `${initial}${unit} (current)`, value: initial }, ...options];
+	}
+	return options;
+}
+
+function validateRiceText(key: RiceInputKey): (value: string | undefined) => string | undefined {
+	return (value) => {
+		const text = String(value ?? "").trim();
+		if (!text) return undefined;
+		try {
+			requireRiceInput(key, text);
+			return undefined;
+		} catch (error) {
+			return error instanceof Error ? error.message : `Invalid ${key}.`;
+		}
+	};
+}
+
+function buildRiceQuestions(values: TaskWizardValues): TaskWizardValueQuestion[] {
+	return [
+		{
+			type: "text",
+			name: "reach",
+			message: `RICE reach (${formatAllowedRiceInput("reach")}; blank for none)`,
+			validate: validateRiceText("reach"),
+		},
+		{
+			type: "select",
+			name: "impact",
+			message: "RICE impact",
+			options: buildRiceScalePromptOptions(RICE_IMPACT_OPTIONS, values.impact),
+		},
+		{
+			type: "select",
+			name: "confidence",
+			message: "RICE confidence",
+			options: buildRiceScalePromptOptions(RICE_CONFIDENCE_OPTIONS, values.confidence, "%"),
+		},
+		{
+			type: "text",
+			name: "effort",
+			message: `RICE effort (${formatAllowedRiceInput("effort")}; blank for none)`,
+			validate: validateRiceText("effort"),
+		},
+	];
+}
+
+/** The RICE inputs the wizard collected for the given keys, blank meaning unset. */
+function pickWizardRiceInputs(values: TaskWizardValues, keys: readonly RiceInputKey[]) {
+	return parseRiceInputs(Object.fromEntries(keys.map((key) => [key, values[key]])), { prioritization: "rice" });
 }
 
 function buildTaskTypePromptValues(
@@ -408,6 +492,7 @@ async function runTaskWizardValues(params: {
 	mode: "create" | "edit";
 	statuses: string[];
 	priorities?: string[];
+	prioritization?: PrioritizationMode;
 	types?: string[];
 	projects?: string[];
 	initialValues: TaskWizardValues;
@@ -458,12 +543,16 @@ async function runTaskWizardValues(params: {
 				message: "Status",
 				options: statusPrompt.options,
 			},
-			{
-				type: "select",
-				name: "priority",
-				message: "Priority",
-				options: priorityPrompt.options,
-			},
+			...(params.prioritization === "rice"
+				? buildRiceQuestions(values)
+				: [
+						{
+							type: "select" as const,
+							name: "priority" as const,
+							message: "Priority",
+							options: priorityPrompt.options,
+						},
+					]),
 			{
 				type: "select",
 				name: "type",
@@ -599,6 +688,10 @@ async function runTaskWizardValues(params: {
 			description: values.description,
 			status: canonicalStatus,
 			priority: normalizePriorityValue(values.priority) ?? "",
+			reach: values.reach.trim(),
+			impact: values.impact.trim(),
+			confidence: values.confidence.trim(),
+			effort: values.effort.trim(),
 			type: resolveTaskTypeValue(values.type, params.types) ?? values.type.trim(),
 			project: resolveProjectValue(values.project, params.projects) ?? values.project.trim(),
 			dueDate: normalizeDueDate(values.dueDate, "Due date") ?? "",
@@ -650,12 +743,20 @@ export async function pickTaskForEditWizard(params: {
 	}
 }
 
+function formatWizardRiceInput(value: number | undefined): string {
+	return value === undefined ? "" : String(value);
+}
+
 function toInitialWizardValues(input: { title?: string } & Partial<Task>): TaskWizardValues {
 	return {
 		title: input.title ?? "",
 		description: input.description ?? "",
 		status: input.status ?? "",
 		priority: input.priority ?? "",
+		reach: formatWizardRiceInput(input.rice?.reach),
+		impact: formatWizardRiceInput(input.rice?.impact),
+		confidence: formatWizardRiceInput(input.rice?.confidence),
+		effort: formatWizardRiceInput(input.rice?.effort),
 		type: input.type ?? "",
 		project: input.project ?? "",
 		dueDate: input.dueDate ?? "",
@@ -681,6 +782,7 @@ export async function runTaskCreateWizard(
 		mode: "create",
 		statuses: options.statuses,
 		priorities: options.priorities,
+		prioritization: options.prioritization,
 		types: options.types,
 		projects: options.projects,
 		initialValues,
@@ -692,6 +794,13 @@ export async function runTaskCreateWizard(
 
 	const priority = values.priority.trim();
 	const parsedPriority = priority.length > 0 ? priority : undefined;
+	const rice =
+		options.prioritization === "rice"
+			? pickWizardRiceInputs(
+					values,
+					RICE_INPUT_KEYS.filter((key) => values[key].length > 0),
+				)
+			: undefined;
 	const type = values.type.trim();
 	const parsedType = type.length > 0 ? type : undefined;
 	const project = values.project.trim();
@@ -713,6 +822,7 @@ export async function runTaskCreateWizard(
 		...(values.description.trim().length > 0 && { description: values.description }),
 		...(values.status.trim().length > 0 && { status: values.status }),
 		...(parsedPriority && { priority: parsedPriority }),
+		...(rice && { rice }),
 		...(parsedType && { type: parsedType }),
 		...(parsedProject && { project: parsedProject }),
 		...(dueDate && { dueDate }),
@@ -739,6 +849,7 @@ export async function runTaskEditWizard(
 		mode: "edit",
 		statuses: options.statuses,
 		priorities: options.priorities,
+		prioritization: options.prioritization,
 		types: options.types,
 		projects: options.projects,
 		initialValues: initial,
@@ -760,6 +871,15 @@ export async function runTaskEditWizard(
 	}
 	if (values.priority !== initial.priority && values.priority.trim().length > 0) {
 		updateInput.priority = values.priority;
+	}
+	if (options.prioritization === "rice") {
+		const rice = pickWizardRiceInputs(
+			values,
+			RICE_INPUT_KEYS.filter((key) => values[key] !== initial[key]),
+		);
+		if (rice) {
+			updateInput.rice = rice;
+		}
 	}
 	if (values.type !== initial.type) {
 		updateInput.type = values.type;

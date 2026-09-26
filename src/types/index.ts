@@ -130,7 +130,8 @@ export interface TaskCreateInput {
 	description?: string;
 	status?: TaskStatus;
 	priority?: string;
-	rice?: RiceInputs;
+	/** A null input is left unset, as if it were not given. */
+	rice?: RiceInputsUpdate;
 	type?: string;
 	project?: string;
 	ordinal?: number;

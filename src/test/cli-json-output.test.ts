@@ -99,6 +99,7 @@ describe("CLI JSON output", () => {
 					status: "In Progress",
 					type: "enhancement",
 					priority: "high",
+					rice: null,
 					project: null,
 					assignees: ["@alex"],
 					reporter: "@sam",

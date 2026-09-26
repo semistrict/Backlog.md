@@ -1,4 +1,7 @@
-export interface TaskEditArgs {
+import type { RiceInputsUpdate } from "./index.ts";
+
+/** RICE inputs are top-level fields, as CLI flags and MCP parameters give them; null clears one. */
+export interface TaskEditArgs extends RiceInputsUpdate {
 	title?: string;
 	dueDate?: string | null;
 	description?: string;

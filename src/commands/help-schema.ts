@@ -2,7 +2,9 @@ import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import type { Command } from "commander";
 import { DEFAULT_STATUSES } from "../constants/index.ts";
+import type { PrioritizationMode, RiceInputKey } from "../types/index.ts";
 import { resolveBacklogDirectory } from "../utils/backlog-directory.ts";
+import { formatAllowedRiceInput, parsePrioritizationMode } from "../utils/prioritization.ts";
 import { getPriorityLabels } from "../utils/priority-config.ts";
 import { getProjectValues } from "../utils/project-config.ts";
 import { BACKLOG_CWD_ENV } from "../utils/runtime-cwd.ts";
@@ -231,6 +233,17 @@ export function getCliPriorityValues(): string[] {
 	return getPriorityLabels();
 }
 
+function getCliPrioritizationMode(): PrioritizationMode {
+	const configPath = findBacklogConfigPathSync(getRuntimeConfigStartDir());
+	if (!configPath) return "priority";
+	try {
+		const value = parseStringValueFromConfig(readFileSync(configPath, "utf8"), ["prioritization"]);
+		return (value && parsePrioritizationMode(value)) || "priority";
+	} catch {
+		return "priority";
+	}
+}
+
 export function getCliTaskTypeValues(): string[] {
 	const configPath = findBacklogConfigPathSync(getRuntimeConfigStartDir());
 	if (configPath) {
@@ -293,7 +306,15 @@ export function statusType(options?: { includeDraft?: boolean; multiple?: boolea
 }
 
 export function priorityType(): string {
+	if (getCliPrioritizationMode() === "rice") {
+		return "not used: prioritization is rice";
+	}
 	return `one of configured priorities: ${getCliPriorityValues().join(", ")}`;
+}
+
+export function riceInputType(key: RiceInputKey): () => string {
+	return () =>
+		getCliPrioritizationMode() === "rice" ? formatAllowedRiceInput(key) : "not used: prioritization is priority";
 }
 
 export function taskType(options?: { multiple?: boolean }): string {

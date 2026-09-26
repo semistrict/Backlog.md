@@ -10,6 +10,12 @@ import type {
 } from "../types/index.ts";
 import type { DependencyGraph } from "../utils/dependency-graph.ts";
 import type { ListPage } from "../utils/list-window.ts";
+import {
+	computeRiceScore,
+	getPrioritizationMode,
+	type PrioritizationConfig,
+	RICE_INPUT_KEYS,
+} from "../utils/prioritization.ts";
 import type { TaskReadiness } from "../utils/readiness.ts";
 import { sortByTaskId } from "../utils/task-sorting.ts";
 
@@ -18,7 +24,10 @@ type TaskSummaryJson = {
 	title: string;
 	status: string;
 	type: string | null;
+	/** Always null in RICE mode. */
 	priority: string | null;
+	/** Always null in priority mode. */
+	rice: RiceJson | null;
 	project: string | null;
 	assignees: string[];
 	reporter: string | null;
@@ -38,6 +47,15 @@ type TaskSummaryJson = {
 	 * the task is unfinished and every dependency it names resolved to a completed task.
 	 */
 	isReady: boolean;
+};
+
+/** RICE inputs as stored, and the score derived from them once all four are known. */
+type RiceJson = {
+	reach: number | null;
+	impact: number | null;
+	confidence: number | null;
+	effort: number | null;
+	score: number | null;
 };
 
 type ChecklistItemJson = {
@@ -125,14 +143,24 @@ function normalizePublicDate(value: string | undefined): string | null {
 	return Number.isNaN(parsed.getTime()) ? value : parsed.toISOString().replace(/\.\d{3}Z$/, "Z");
 }
 
-function toTaskSummaryJson(task: TaskListItem): TaskSummaryJson {
+function toRiceJson(task: TaskListItem): RiceJson {
+	const rice = Object.fromEntries(RICE_INPUT_KEYS.map((key) => [key, task.rice?.[key] ?? null])) as Omit<
+		RiceJson,
+		"score"
+	>;
+	return { ...rice, score: computeRiceScore(task.rice) ?? null };
+}
+
+function toTaskSummaryJson(task: TaskListItem, prioritization: PrioritizationConfig | null): TaskSummaryJson {
 	const acceptanceCriteria = task.acceptanceCriteriaItems ?? [];
+	const riceMode = getPrioritizationMode(prioritization) === "rice";
 	return {
 		id: task.id,
 		title: task.title,
 		status: task.status,
 		type: nullable(task.type),
-		priority: nullable(task.priority),
+		priority: riceMode ? null : nullable(task.priority),
+		rice: riceMode ? toRiceJson(task) : null,
 		project: nullable(task.project),
 		assignees: task.assignee ?? [],
 		reporter: nullable(task.reporter),
@@ -168,9 +196,13 @@ function toDependencyGraphJson(graph: DependencyGraph): DependencyGraphJson {
 	return { root: graph.rootId, nodes: graph.nodes, edges: graph.edges };
 }
 
-function toTaskDetailsJson(task: TaskDetail, projectRoot: string): TaskDetailsJson {
+function toTaskDetailsJson(
+	task: TaskDetail,
+	projectRoot: string,
+	prioritization: PrioritizationConfig | null,
+): TaskDetailsJson {
 	return {
-		...toTaskSummaryJson({ ...task, isReady: task.readiness.isReady }),
+		...toTaskSummaryJson({ ...task, isReady: task.readiness.isReady }, prioritization),
 		path: toProjectRelativePath(projectRoot, task.filePath),
 		description: nullableDescription(task.description),
 		dependencies: task.dependencies ?? [],
@@ -221,15 +253,24 @@ function cutListJson(page: ListPage<unknown> | undefined): { total?: number; nex
 	return page?.cut ? { total: page.total, nextSkip: page.nextSkip } : {};
 }
 
-export function taskListJson(tasks: TaskListItem[], page?: ListPage<unknown>) {
-	return { schemaVersion: 1, kind: "task-list" as const, tasks: tasks.map(toTaskSummaryJson), ...cutListJson(page) };
+export function taskListJson(
+	tasks: TaskListItem[],
+	prioritization: PrioritizationConfig | null,
+	page?: ListPage<unknown>,
+) {
+	return {
+		schemaVersion: 1,
+		kind: "task-list" as const,
+		tasks: tasks.map((task) => toTaskSummaryJson(task, prioritization)),
+		...cutListJson(page),
+	};
 }
 
-export function taskViewJson(task: TaskDetail, projectRoot: string) {
+export function taskViewJson(task: TaskDetail, projectRoot: string, prioritization: PrioritizationConfig | null) {
 	return {
 		schemaVersion: 1,
 		kind: "task-view" as const,
-		task: toTaskDetailsJson(task, projectRoot),
+		task: toTaskDetailsJson(task, projectRoot, prioritization),
 	};
 }
 
@@ -260,12 +301,13 @@ export function searchJson(
 	results: SearchResultInput[],
 	projectRoot: string,
 	docsDir: string,
+	prioritization: PrioritizationConfig | null,
 	page?: ListPage<unknown>,
 ) {
 	const publicResults: SearchResultJson[] = [];
 	for (const result of results) {
 		if (result.type === "task") {
-			publicResults.push({ type: "task", data: toTaskSummaryJson(result.task) });
+			publicResults.push({ type: "task", data: toTaskSummaryJson(result.task, prioritization) });
 			continue;
 		}
 		if (result.type === "document") {

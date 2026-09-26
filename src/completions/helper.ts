@@ -12,6 +12,7 @@ import {
 	getLabels,
 	getPriorities,
 	getProjects,
+	getRiceScaleValues,
 	getStatuses,
 	getTaskIds,
 	getTaskTypes,
@@ -123,6 +124,9 @@ async function getFlagValueCompletions(flagName: string, context: CompletionCont
 			return await getStatuses();
 		case "priority":
 			return await getPriorities();
+		case "impact":
+		case "confidence":
+			return await getRiceScaleValues(cleanFlag);
 		case "type":
 			return context.command === "task" &&
 				(context.subcommand === "create" || context.subcommand === "edit" || context.subcommand === "list")

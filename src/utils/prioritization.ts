@@ -1,5 +1,5 @@
 import type { BacklogConfig, PrioritizationMode, RiceInputKey, RiceInputs, RiceInputsUpdate } from "../types/index.ts";
-import { getPriorityRank, resolvePriorityValue } from "./priority-config.ts";
+import { formatPriorityLabel, getPriorityRank, resolvePriorityValue } from "./priority-config.ts";
 
 export type PrioritizationConfig = Pick<BacklogConfig, "priorities" | "prioritization">;
 
@@ -9,9 +9,25 @@ export const PRIORITIZATION_MODES: readonly PrioritizationMode[] = ["priority", 
 
 export const RICE_INPUT_KEYS: readonly RiceInputKey[] = ["reach", "impact", "confidence", "effort"];
 
-export const RICE_IMPACT_VALUES: readonly number[] = [3, 2, 1, 0.5, 0.25];
+/** The fixed impact scale, highest first, with the names RICE gives each step. */
+export const RICE_IMPACT_OPTIONS: ReadonlyArray<{ value: number; label: string }> = [
+	{ value: 3, label: "Massive" },
+	{ value: 2, label: "High" },
+	{ value: 1, label: "Medium" },
+	{ value: 0.5, label: "Low" },
+	{ value: 0.25, label: "Minimal" },
+];
 
-export const RICE_CONFIDENCE_VALUES: readonly number[] = [100, 80, 50];
+/** The fixed confidence scale in percent, highest first. */
+export const RICE_CONFIDENCE_OPTIONS: ReadonlyArray<{ value: number; label: string }> = [
+	{ value: 100, label: "High" },
+	{ value: 80, label: "Medium" },
+	{ value: 50, label: "Low" },
+];
+
+export const RICE_IMPACT_VALUES: readonly number[] = RICE_IMPACT_OPTIONS.map((option) => option.value);
+
+export const RICE_CONFIDENCE_VALUES: readonly number[] = RICE_CONFIDENCE_OPTIONS.map((option) => option.value);
 
 const RICE_INPUT_RULES: Record<RiceInputKey, { label: string; accepts: (value: number) => boolean; allowed: string }> =
 	{
@@ -90,6 +106,34 @@ export function requireRiceInput(key: RiceInputKey, value: unknown): number {
 	return number;
 }
 
+/**
+ * Reads RICE inputs given as text or numbers, where an empty value or null clears that input.
+ * Returns nothing when no input is given; throws in priority mode or for an out-of-scale value.
+ */
+export function parseRiceInputs(
+	raw: Partial<Record<RiceInputKey, unknown>>,
+	config: Pick<BacklogConfig, "prioritization"> | null | undefined,
+): RiceInputsUpdate | undefined {
+	const given = RICE_INPUT_KEYS.filter((key) => raw[key] !== undefined);
+	if (given.length === 0) return undefined;
+	assertPrioritizationMode(config, "rice");
+	const update: RiceInputsUpdate = {};
+	for (const key of given) {
+		const value = raw[key];
+		update[key] = value === null || String(value).trim() === "" ? null : requireRiceInput(key, value);
+	}
+	return update;
+}
+
+/** The RICE inputs present on an object that carries them as top-level fields, such as edit arguments. */
+export function pickRiceInputs(source: RiceInputsUpdate): RiceInputsUpdate | undefined {
+	const picked: RiceInputsUpdate = {};
+	for (const key of RICE_INPUT_KEYS) {
+		if (source[key] !== undefined) picked[key] = source[key];
+	}
+	return hasRiceInputs(picked) ? picked : undefined;
+}
+
 export function hasRiceInputs(rice: RiceInputs | RiceInputsUpdate | null | undefined): boolean {
 	return Boolean(rice) && RICE_INPUT_KEYS.some((key) => rice?.[key] !== undefined);
 }
@@ -152,6 +196,29 @@ export function formatRiceScore(score: number): string {
 
 export function formatRiceInput(key: RiceInputKey, value: number): string {
 	return key === "confidence" ? `${value}%` : String(value);
+}
+
+/** "266.7 (Reach 500, Impact 2, Confidence 80%, Effort 3)", "unscored (Reach 500)", or nothing without inputs. */
+export function formatRiceSummary(rice: RiceInputs | undefined): string | undefined {
+	if (!hasRiceInputs(rice)) return undefined;
+	const score = computeRiceScore(rice);
+	const inputs = RICE_INPUT_KEYS.flatMap((key) => {
+		const value = rice?.[key];
+		return value === undefined ? [] : [`${getRiceInputLabel(key)} ${formatRiceInput(key, value)}`];
+	});
+	return `${score === undefined ? "unscored" : formatRiceScore(score)} (${inputs.join(", ")})`;
+}
+
+/** The label and value a detail view shows for a task's rank, or nothing when it has none. */
+export function describeTaskRank(
+	task: RankedTask,
+	config?: PrioritizationConfig | null,
+): { label: "Priority" | "RICE"; value: string } | undefined {
+	if (getPrioritizationMode(config) === "rice") {
+		const value = formatRiceSummary(task.rice);
+		return value ? { label: "RICE", value } : undefined;
+	}
+	return task.priority ? { label: "Priority", value: formatPriorityLabel(task.priority, config) } : undefined;
 }
 
 /** The short marker list views print in front of a task: its priority, or its RICE score. */

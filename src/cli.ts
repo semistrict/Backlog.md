@@ -12,8 +12,10 @@ import {
 	addHelpSchema,
 	choiceType,
 	getCliTaskTypeValues,
+	type HelpField,
 	priorityType,
 	projectType,
+	riceInputType,
 	statusType,
 	taskType,
 } from "./commands/help-schema.ts";
@@ -59,6 +61,7 @@ import {
 	type DocumentSearchResult,
 	isLocalEditableTask,
 	type Milestone,
+	type RiceInputsUpdate,
 	type SearchPriorityFilter,
 	type SearchResult,
 	type SearchResultType,
@@ -114,7 +117,17 @@ import {
 	isReservedTaskPrefix,
 	normalizeId,
 } from "./utils/prefix-config.ts";
-import { formatValidPriorityValues, getPriorityOptions, resolvePriorityValue } from "./utils/priority-config.ts";
+import {
+	formatTaskRankBadge,
+	getPrioritizationMode,
+	PRIORITIZATION_MODES,
+	type PrioritizationConfig,
+	parsePrioritizationMode,
+	parseRiceInputs,
+	RICE_INPUT_KEYS,
+	resolveActivePriorityValue,
+} from "./utils/prioritization.ts";
+import { formatValidPriorityValues, getPriorityOptions } from "./utils/priority-config.ts";
 import {
 	formatValidProjectValues,
 	getProjectValues,
@@ -157,6 +170,7 @@ const CONFIG_GET_KEYS = [
 	"statuses",
 	"labels",
 	"priorities",
+	"prioritization",
 	"types",
 	"projects",
 	"milestones",
@@ -179,6 +193,7 @@ const CONFIG_SET_KEYS = [
 	"projectName",
 	"defaultAssignee",
 	"defaultStatus",
+	"prioritization",
 	"dateFormat",
 	"maxColumnWidth",
 	"autoOpenBrowser",
@@ -314,8 +329,19 @@ function formatTaskEditError(error: unknown, taskId: string, commandKind = "task
 	return message;
 }
 
-function formatPlainTaskListRow(task: Task, options: { includeStatus?: boolean } = {}): string {
-	const priorityIndicator = task.priority ? `[${task.priority.toUpperCase()}] ` : "";
+/** A task's plain detail view, with the relationships and ranking the project gives it. */
+async function formatTaskDetailPlain(core: Core, task: Task, filePathOverride?: string): Promise<string> {
+	const [detail, prioritization] = await Promise.all([loadTaskDetail(core, task), core.filesystem.loadConfig()]);
+	return formatTaskPlainText(detail, { prioritization, filePathOverride });
+}
+
+function formatPlainTaskListRow(
+	task: Task,
+	prioritization: PrioritizationConfig | null,
+	options: { includeStatus?: boolean } = {},
+): string {
+	const rankBadge = formatTaskRankBadge(task, prioritization);
+	const priorityIndicator = rankBadge ? `[${rankBadge}] ` : "";
 	const typeIndicator = task.type ? `[${task.type}] ` : "";
 	const statusIndicator = options.includeStatus && task.status ? ` (${task.status})` : "";
 	const acceptanceCriteria = formatAcceptanceCriteriaSummarySuffix(task);
@@ -337,7 +363,14 @@ async function normalizeCliStatusList(core: Core, values: string[], optionName: 
 
 async function normalizeCliPriority(core: Core, value: string): Promise<string | null> {
 	const config = await core.filesystem.loadConfig();
-	const normalized = resolvePriorityValue(value, config);
+	let normalized: string | undefined;
+	try {
+		normalized = resolveActivePriorityValue(value, config);
+	} catch (error) {
+		console.error(error instanceof Error ? error.message : String(error));
+		process.exitCode = 1;
+		return null;
+	}
 	if (!normalized) {
 		console.error(`Invalid priority: ${value}. Valid values are: ${formatValidPriorityValues(config)}`);
 		process.exitCode = 1;
@@ -539,6 +572,20 @@ function parseMilestoneTaskHandling(value: string | undefined): MilestoneRemoveA
 	return null;
 }
 
+function hasRiceOptions(options: Record<string, unknown>): boolean {
+	return RICE_INPUT_KEYS.some((key) => options[key] !== undefined);
+}
+
+/** Help entries for the four RICE inputs; edits add how to clear one. */
+function riceHelpFields(prefix: string, clearable = false): HelpField[] {
+	const clearHint = clearable ? "; pass an empty value to clear" : "";
+	return RICE_INPUT_KEYS.map((key) => ({
+		name: key,
+		type: riceInputType(key),
+		description: `${prefix} ${key}${key === "confidence" ? " in percent" : ""}${clearHint}`,
+	}));
+}
+
 function hasCreateFieldFlags(options: Record<string, unknown>): boolean {
 	return Boolean(
 		options.description !== undefined ||
@@ -547,6 +594,7 @@ function hasCreateFieldFlags(options: Record<string, unknown>): boolean {
 			options.status !== undefined ||
 			options.labels !== undefined ||
 			options.priority !== undefined ||
+			hasRiceOptions(options) ||
 			options.type !== undefined ||
 			options.project !== undefined ||
 			options.ordinal !== undefined ||
@@ -579,6 +627,7 @@ function hasEditFieldFlags(options: Record<string, unknown>): boolean {
 			options.status !== undefined ||
 			options.label !== undefined ||
 			options.priority !== undefined ||
+			hasRiceOptions(options) ||
 			options.type !== undefined ||
 			options.project !== undefined ||
 			options.ordinal !== undefined ||
@@ -1896,6 +1945,7 @@ addHelpSchema(taskCmd.command("create [title]"), {
 			description: "Task labels; repeat -l or use label1,label2",
 		},
 		{ name: "priority", type: priorityType, description: "Task priority" },
+		...riceHelpFields("RICE"),
 		{ name: "type", type: taskType, description: "Task type; case-insensitive" },
 		{ name: "project", type: projectType, description: "Task project; case-insensitive" },
 		{ name: "due-date", type: "date", description: "Optional due date (YYYY-MM-DD)" },
@@ -1933,6 +1983,10 @@ addHelpSchema(taskCmd.command("create [title]"), {
 	.option("-s, --status <status>")
 	.option("-l, --labels <labels>", "add task labels (comma-separated or repeatable)", createMultiValueAccumulator())
 	.option("--priority <priority>", "set task priority (configured priorities)")
+	.option("--reach <number>", "set RICE reach, 0 or more (prioritization: rice)")
+	.option("--impact <number>", "set RICE impact: 3, 2, 1, 0.5 or 0.25 (prioritization: rice)")
+	.option("--confidence <percent>", "set RICE confidence: 100, 80 or 50 (prioritization: rice)")
+	.option("--effort <number>", "set RICE effort, greater than 0 (prioritization: rice)")
 	.option("--type <type>", "set task type (configured task types)")
 	.option("--project <project>", "set task project (configured projects)")
 	.option("--due-date <date>", "set due date (YYYY-MM-DD)")
@@ -2004,6 +2058,7 @@ addHelpSchema(taskCmd.command("create [title]"), {
 			const wizardInput = await runTaskCreateWizard({
 				statuses,
 				priorities: config?.priorities,
+				prioritization: config?.prioritization,
 				types: config?.types,
 				projects: config?.projects,
 			});
@@ -2051,6 +2106,7 @@ addHelpSchema(taskCmd.command("create [title]"), {
 			const criteria = processAcceptanceCriteriaOptions(options);
 			const milestone =
 				typeof options.milestone === "string" ? await resolveCliMilestoneInput(core, options.milestone) : undefined;
+			const rice = parseRiceInputs(options, await core.filesystem.loadConfig());
 			const { task, filePath } = await core.createTaskFromInput({
 				title: title ?? "",
 				description: options.description || options.desc ? String(options.description || options.desc) : undefined,
@@ -2064,6 +2120,7 @@ addHelpSchema(taskCmd.command("create [title]"), {
 				modifiedFiles: parseDelimitedStringList(options.modifiedFile),
 				parentTaskId: options.parent ? String(options.parent) : undefined,
 				priority: options.priority ? String(options.priority) : undefined,
+				rice,
 				type: options.type !== undefined ? String(options.type) : undefined,
 				project: options.project !== undefined ? String(options.project) : undefined,
 				...(ordinalValue !== undefined ? { ordinal: ordinalValue } : {}),
@@ -2077,7 +2134,7 @@ addHelpSchema(taskCmd.command("create [title]"), {
 			});
 
 			if (usePlainOutput) {
-				console.log(formatTaskPlainText(await loadTaskDetail(core, task), { filePathOverride: filePath }));
+				console.log(await formatTaskDetailPlain(core, task, filePath));
 				return;
 			}
 
@@ -2291,15 +2348,17 @@ addListWindowOptions(searchCommand)
 			filters,
 		});
 
+		const prioritization = await core.filesystem.loadConfig();
 		if (outputMode !== "interactive") {
 			const printed = searchResultsInPrintedOrder(searchResults, outputMode);
 			if (outputMode === "plain") {
-				printListWindow(printed, listWindow, printSearchResults);
+				printListWindow(printed, listWindow, (results) => printSearchResults(results, prioritization));
 				cleanup();
 				return;
 			}
 			const page = selectListWindow(printed, listWindow);
-			printJson(searchJson(await projectSearchTaskRows(core, page.items), cwd, core.filesystem.docsDir, page));
+			const rows = await projectSearchTaskRows(core, page.items);
+			printJson(searchJson(rows, cwd, core.filesystem.docsDir, prioritization, page));
 			cleanup();
 			return;
 		}
@@ -2313,7 +2372,7 @@ addListWindowOptions(searchCommand)
 
 		// If no tasks exist at all, show plain text results
 		if (allTasks.length === 0) {
-			printSearchResults(searchResultsInPrintedOrder(searchResults, "plain"));
+			printSearchResults(searchResultsInPrintedOrder(searchResults, "plain"), prioritization);
 			cleanup();
 			return;
 		}
@@ -2325,7 +2384,7 @@ addListWindowOptions(searchCommand)
 		const requiresPrefilteredTaskSet = Boolean(modifiedFileFilters?.length);
 		const interactiveTasks = requiresPrefilteredTaskSet ? searchResultTasks : allTasks;
 		if (interactiveTasks.length === 0) {
-			printSearchResults(searchResultsInPrintedOrder(searchResults, "plain"));
+			printSearchResults(searchResultsInPrintedOrder(searchResults, "plain"), prioritization);
 			cleanup();
 			return;
 		}
@@ -2442,12 +2501,13 @@ function searchResultsInPrintedOrder(results: SearchResult[], outputMode: "plain
 	return SEARCH_RESULT_TYPES.flatMap((type) => printable.filter((result) => result.type === type));
 }
 
-function formatSearchResultRow(result: SearchResult): string {
+function formatSearchResultRow(result: SearchResult, prioritization: PrioritizationConfig | null): string {
 	const scoreText = formatScore(result.score);
 	if (result.type === "task") {
 		const { task } = result;
 		const statusText = task.status ? ` (${task.status})` : "";
-		const priorityText = task.priority ? ` [${task.priority.toUpperCase()}]` : "";
+		const rankBadge = formatTaskRankBadge(task, prioritization);
+		const priorityText = rankBadge ? ` [${rankBadge}]` : "";
 		return `  ${task.id} - ${task.title}${statusText}${priorityText}${scoreText}`;
 	}
 	const { id, title } = result.type === "document" ? result.document : result.decision;
@@ -2455,10 +2515,11 @@ function formatSearchResultRow(result: SearchResult): string {
 }
 
 /** Prints search results given in plain printed order, under one heading per result type. */
-function printSearchResults(results: SearchResult[]): void {
+function printSearchResults(results: SearchResult[], prioritization: PrioritizationConfig | null): void {
 	const sections = SEARCH_RESULT_TYPES.flatMap((type) => {
 		const group = results.filter((result) => result.type === type);
-		return group.length > 0 ? [[SEARCH_RESULT_HEADINGS[type], ...group.map(formatSearchResultRow)].join("\n")] : [];
+		const rows = group.map((result) => formatSearchResultRow(result, prioritization));
+		return group.length > 0 ? [[SEARCH_RESULT_HEADINGS[type], ...rows].join("\n")] : [];
 	});
 	console.log(sections.length > 0 ? sections.join("\n\n") : "No results found.");
 }
@@ -2545,11 +2606,15 @@ function groupTasksByStatus(tasks: Task[], statuses: string[]): Array<{ status: 
 	return orderedStatuses.map((status) => ({ status, tasks: groups.get(status) ?? [] }));
 }
 
-function printTasksGroupedByStatus(tasks: Task[], statuses: string[]): void {
+function printTasksGroupedByStatus(
+	tasks: Task[],
+	statuses: string[],
+	prioritization: PrioritizationConfig | null,
+): void {
 	for (const group of groupTasksByStatus(tasks, statuses)) {
 		console.log(`${group.status || "No Status"}:`);
 		for (const task of group.tasks) {
-			console.log(formatPlainTaskListRow(task));
+			console.log(formatPlainTaskListRow(task, prioritization));
 		}
 		console.log();
 	}
@@ -2718,7 +2783,7 @@ async function runTaskList(
 		const readyRows = options.ready ? readinessRows.filter((row) => row.isReady) : readinessRows;
 		if (outputMode === "json") {
 			const page = selectListWindow(narrowForDisplay(readyRows), listWindow);
-			emitJson(taskListJson(page.items, page));
+			emitJson(taskListJson(page.items, config, page));
 			cleanup();
 			return;
 		}
@@ -2741,13 +2806,14 @@ async function runTaskList(
 				return;
 			}
 			if (flatPriorityList) {
-				console.log("Tasks (sorted by priority):");
+				const rankName = getPrioritizationMode(config) === "rice" ? "RICE score" : "priority";
+				console.log(`Tasks (sorted by ${rankName}):`);
 				for (const t of windowTasks) {
-					console.log(formatPlainTaskListRow(t, { includeStatus: true }));
+					console.log(formatPlainTaskListRow(t, config, { includeStatus: true }));
 				}
 				return;
 			}
-			printTasksGroupedByStatus(windowTasks, statuses);
+			printTasksGroupedByStatus(windowTasks, statuses, config);
 		});
 		cleanup();
 		return;
@@ -3167,6 +3233,7 @@ async function runEditCommand(target: EditCommandTarget, requestedIds: string[] 
 			task: existingTaskForWizard,
 			statuses,
 			priorities: config?.priorities,
+			prioritization: config?.prioritization,
 			types: config?.types,
 			projects: config?.projects,
 		});
@@ -3234,6 +3301,15 @@ async function runEditCommand(target: EditCommandTarget, requestedIds: string[] 
 			return;
 		}
 		normalizedPriority = priority;
+	}
+
+	let rice: RiceInputsUpdate | undefined;
+	try {
+		rice = parseRiceInputs(options, await core.filesystem.loadConfig());
+	} catch (error) {
+		console.error(error instanceof Error ? error.message : String(error));
+		process.exitCode = 1;
+		return;
 	}
 
 	let ordinalValue: number | undefined;
@@ -3400,6 +3476,7 @@ async function runEditCommand(target: EditCommandTarget, requestedIds: string[] 
 	if (normalizedPriority) {
 		editArgs.priority = normalizedPriority;
 	}
+	Object.assign(editArgs, rice);
 	if (options.type !== undefined) {
 		editArgs.type = String(options.type);
 	}
@@ -3523,7 +3600,7 @@ async function runEditCommand(target: EditCommandTarget, requestedIds: string[] 
 		}
 
 		if (isPlainRequested(options)) {
-			console.log(formatTaskPlainText(await loadTaskDetail(core, updatedTask)));
+			console.log(await formatTaskDetailPlain(core, updatedTask));
 			return;
 		}
 
@@ -3568,6 +3645,16 @@ function addEditFieldOptions(cmd: Command) {
 			createMultiValueAccumulator(),
 		)
 		.option("--priority <priority>", "set task priority (configured priorities)")
+		.option("--reach <number>", "set RICE reach, 0 or more; pass an empty value to clear (prioritization: rice)")
+		.option(
+			"--impact <number>",
+			"set RICE impact: 3, 2, 1, 0.5 or 0.25; pass an empty value to clear (prioritization: rice)",
+		)
+		.option(
+			"--confidence <percent>",
+			"set RICE confidence: 100, 80 or 50; pass an empty value to clear (prioritization: rice)",
+		)
+		.option("--effort <number>", "set RICE effort, greater than 0; pass an empty value to clear (prioritization: rice)")
 		.option("--type <type>", "set task type (configured task types; pass an empty value to clear)")
 		.option("--project <project>", "set task project (configured projects; pass an empty value to clear)")
 		.option("--due-date <date>", "set due date (YYYY-MM-DD)")
@@ -3717,6 +3804,8 @@ const taskEditCommand = addHelpSchema(taskCmd.command("edit [taskIds...]"), {
 			type: projectType,
 			description: "Replacement task project; case-insensitive; pass an empty value to clear",
 		},
+		{ name: "priority", type: priorityType, description: "Replacement task priority" },
+		...riceHelpFields("Set RICE", true),
 		{ name: "due-date", type: "date", description: "Set the task due date (YYYY-MM-DD)" },
 		{ name: "clear-due-date", type: "Boolean", description: "Clear the task due date" },
 		{
@@ -3829,12 +3918,12 @@ addHelpSchema(taskCmd.command("view <taskId>"), {
 
 		// Plain text output for non-interactive environments
 		if (outputMode === "json") {
-			printJson(taskViewJson(await loadTaskDetail(core, task), cwd));
+			printJson(taskViewJson(await loadTaskDetail(core, task), cwd, await core.filesystem.loadConfig()));
 			return;
 		}
 
 		if (outputMode === "plain") {
-			console.log(formatTaskPlainText(await loadTaskDetail(core, task)));
+			console.log(await formatTaskDetailPlain(core, task));
 			return;
 		}
 
@@ -4014,12 +4103,12 @@ taskCmd
 
 		// Plain text output for non-interactive environments
 		if (outputMode === "json") {
-			printJson(taskViewJson(await loadTaskDetail(core, task), cwd));
+			printJson(taskViewJson(await loadTaskDetail(core, task), cwd, await core.filesystem.loadConfig()));
 			return;
 		}
 
 		if (outputMode === "plain") {
-			console.log(formatTaskPlainText(await loadTaskDetail(core, task)));
+			console.log(await formatTaskDetailPlain(core, task));
 			return;
 		}
 
@@ -4042,7 +4131,7 @@ async function viewDraftById(core: Core, taskId: string, options?: { plain?: boo
 		}
 		const usePlainOutput = isPlainRequested(options) || shouldAutoPlain;
 		if (usePlainOutput) {
-			console.log(formatTaskPlainText(await loadTaskDetail(core, draft)));
+			console.log(await formatTaskDetailPlain(core, draft));
 			return;
 		}
 		await viewTaskEnhanced(draft, { startWithDetailFocus: true, core });
@@ -4091,8 +4180,8 @@ addListWindowOptions(draftListCommand)
 				}
 				console.log("Drafts:");
 				for (const draft of windowDrafts) {
-					const priorityIndicator = draft.priority ? `[${draft.priority.toUpperCase()}] ` : "";
-					console.log(`  ${priorityIndicator}${draft.id} - ${draft.title}`);
+					const rankBadge = formatTaskRankBadge(draft, config);
+					console.log(`  ${rankBadge ? `[${rankBadge}] ` : ""}${draft.id} - ${draft.title}`);
 				}
 			});
 			return;
@@ -4168,7 +4257,8 @@ const draftEditCommand = addHelpSchema(draftCmd.command("edit [taskId]"), {
 		{ name: "add-label", type: "Comma-separated strings", description: "Add labels; repeatable" },
 		{ name: "remove-label", type: "Comma-separated strings", description: "Remove labels; repeatable" },
 		{ name: "clear-labels", type: "Boolean", description: "Remove all labels" },
-		{ name: "priority", type: "String", description: "Set priority (configured priorities)" },
+		{ name: "priority", type: priorityType, description: "Set priority" },
+		...riceHelpFields("Set RICE", true),
 		{ name: "ordinal", type: "Number", description: "Set ordinal for custom ordering" },
 		{ name: "milestone", type: "String", description: "Assign to milestone by ID or title" },
 		{ name: "clear-milestone", type: "Boolean", description: "Clear the milestone assignment" },
@@ -5038,7 +5128,7 @@ agentsCmd
 
 // Config command group
 const CONFIG_AVAILABLE_KEYS =
-	"Available keys: defaultEditor, projectName, defaultAssignee, defaultStatus, statuses, labels, priorities, types, projects, milestones, definitionOfDone, dateFormat, maxColumnWidth, defaultPort, autoOpenBrowser, hideEmptyColumns, remoteOperations, autoCommit, filesystemOnly, bypassGitHooks, zeroPaddedIds, checkActiveBranches, activeBranchDays";
+	"Available keys: defaultEditor, projectName, defaultAssignee, defaultStatus, statuses, labels, priorities, prioritization, types, projects, milestones, definitionOfDone, dateFormat, maxColumnWidth, defaultPort, autoOpenBrowser, hideEmptyColumns, remoteOperations, autoCommit, filesystemOnly, bypassGitHooks, zeroPaddedIds, checkActiveBranches, activeBranchDays";
 
 const configCmd = addHelpSchema(program.command("config"), {
 	reads: "Project Backlog.md configuration",
@@ -5180,6 +5270,9 @@ addHelpSchema(configCmd.command("get <key>"), {
 							.join(", "),
 					);
 					break;
+				case "prioritization":
+					console.log(getPrioritizationMode(config));
+					break;
 				case "types":
 					console.log(getTaskTypeValues(config).join(", "));
 					break;
@@ -5315,6 +5408,15 @@ addHelpSchema(configCmd.command("set <key> <value>"), {
 						console.error("autoOpenBrowser must be true or false");
 						process.exit(1);
 					}
+					break;
+				}
+				case "prioritization": {
+					const mode = parsePrioritizationMode(value);
+					if (!mode) {
+						console.error(`prioritization must be one of: ${PRIORITIZATION_MODES.join(", ")}`);
+						process.exit(1);
+					}
+					config.prioritization = mode;
 					break;
 				}
 				case "hideEmptyColumns": {
@@ -5498,6 +5600,7 @@ addHelpSchema(configCmd.command("list"), {
 					.map((priority) => priority.label)
 					.join(", ")}]`,
 			);
+			console.log(`  prioritization: ${getPrioritizationMode(config)}`);
 			console.log(`  types: [${getTaskTypeValues(config).join(", ")}]`);
 			console.log(`  projects: [${getProjectValues(config).join(", ")}]`);
 			const milestones = await core.filesystem.listMilestones();

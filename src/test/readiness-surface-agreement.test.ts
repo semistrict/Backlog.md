@@ -278,6 +278,7 @@ describe("search JSON readiness for a contested identity", () => {
 			rows.map((task) => ({ type: "task" as const, score: null, task })),
 			"/project",
 			"docs",
+			null,
 		);
 		expect(payload.results.map((result) => (result.type === "task" ? result.data.isReady : null))).toEqual([
 			false,

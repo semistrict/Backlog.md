@@ -1,5 +1,6 @@
 import type { TaskUpdateInput } from "../types/index.ts";
 import type { TaskEditArgs } from "../types/task-edit-args.ts";
+import { pickRiceInputs } from "./prioritization.ts";
 import { normalizeStringList } from "./task-builders.ts";
 
 function sanitizeStringArray(values: string[] | undefined): string[] | undefined {
@@ -53,6 +54,11 @@ export function buildTaskUpdateInput(args: TaskEditArgs): TaskUpdateInput {
 
 	if (typeof args.priority === "string") {
 		updateInput.priority = args.priority;
+	}
+
+	const rice = pickRiceInputs(args);
+	if (rice) {
+		updateInput.rice = rice;
 	}
 
 	if (typeof args.type === "string") {

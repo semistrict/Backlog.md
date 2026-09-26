@@ -2,7 +2,7 @@ import { basename, join } from "node:path";
 import { DEFAULT_STATUSES } from "../../../constants/index.ts";
 import type { VacatedTaskResult } from "../../../core/backlog.ts";
 import { findLocalDuplicateTaskIds } from "../../../core/duplicate-task-repair.ts";
-import { loadTaskDetail, loadTaskListItems } from "../../../core/task-detail.ts";
+import { loadTaskListItems } from "../../../core/task-detail.ts";
 import { isCreateLockError, isTaskLockError } from "../../../file-system/operations.ts";
 import {
 	isLocalEditableTask,
@@ -161,7 +161,7 @@ export class TaskHandlers {
 				disableDefinitionOfDoneDefaults: args.disableDefinitionOfDoneDefaults,
 			});
 
-			return await formatTaskCallResult(await loadTaskDetail(this.core, createdTask));
+			return await formatTaskCallResult(this.core, createdTask);
 		} catch (error) {
 			if (isCreateLockError(error)) {
 				throw new BacklogToolError(error.message, "OPERATION_FAILED");
@@ -438,7 +438,7 @@ export class TaskHandlers {
 	async viewTask(args: { id: string }): Promise<CallToolResult> {
 		const draft = await this.core.filesystem.loadDraft(args.id);
 		if (draft) {
-			return await formatTaskCallResult(await loadTaskDetail(this.core, draft));
+			return await formatTaskCallResult(this.core, draft);
 		}
 
 		const task = await this.core.getTaskWithSubtasks(args.id);
@@ -447,7 +447,7 @@ export class TaskHandlers {
 		}
 		// Task detail is the only MCP result read through the detail path, so it is the only one that
 		// carries the graph. The edit and lifecycle confirmations stay as short as they were.
-		return await formatTaskCallResult(await loadTaskDetail(this.core, task));
+		return await formatTaskCallResult(this.core, task);
 	}
 
 	async archiveTask(args: { id: string }): Promise<CallToolResult> {
@@ -458,7 +458,7 @@ export class TaskHandlers {
 				throw new BacklogToolError(`Failed to archive task: ${args.id}`, "OPERATION_FAILED");
 			}
 
-			return await formatTaskCallResult(await loadTaskDetail(this.core, draft), [`Archived draft ${draft.id}.`]);
+			return await formatTaskCallResult(this.core, draft, [`Archived draft ${draft.id}.`]);
 		}
 
 		const task = await this.loadTaskOrThrow(args.id);
@@ -483,10 +483,7 @@ export class TaskHandlers {
 
 		const refreshed = (await this.core.getTask(task.id)) ?? task;
 		const cleanupMessage = formatDependencyCleanupMessage(task.id, cleanedTaskIds);
-		return await formatTaskCallResult(
-			await loadTaskDetail(this.core, refreshed),
-			cleanupMessage ? [`${cleanupMessage}.`] : undefined,
-		);
+		return await formatTaskCallResult(this.core, refreshed, cleanupMessage ? [`${cleanupMessage}.`] : undefined);
 	}
 
 	async completeTask(args: { id: string }): Promise<CallToolResult> {
@@ -513,7 +510,7 @@ export class TaskHandlers {
 			throw new BacklogToolError(`Failed to complete task: ${args.id}`, "OPERATION_FAILED");
 		}
 
-		return await formatTaskCallResult(await loadTaskDetail(this.core, task), [`Completed task ${task.id}.`], {
+		return await formatTaskCallResult(this.core, task, [`Completed task ${task.id}.`], {
 			filePathOverride: completedFilePath,
 		});
 	}
@@ -535,10 +532,7 @@ export class TaskHandlers {
 
 		const refreshed = (await this.core.getTask(task.id)) ?? task;
 		const cleanupMessage = formatDependencyCleanupMessage(task.id, demotion.cleanedTaskIds);
-		return await formatTaskCallResult(
-			await loadTaskDetail(this.core, refreshed),
-			cleanupMessage ? [`${cleanupMessage}.`] : undefined,
-		);
+		return await formatTaskCallResult(this.core, refreshed, cleanupMessage ? [`${cleanupMessage}.`] : undefined);
 	}
 
 	async editTask(args: TaskEditRequest): Promise<CallToolResult> {
@@ -554,10 +548,7 @@ export class TaskHandlers {
 			}
 			const { task: updatedTask, cleanedTaskIds } = await this.core.editTaskOrDraft(args.id, updateInput);
 			const cleanupMessage = formatDependencyCleanupMessage(args.id, cleanedTaskIds);
-			return await formatTaskCallResult(
-				await loadTaskDetail(this.core, updatedTask),
-				cleanupMessage ? [`${cleanupMessage}.`] : undefined,
-			);
+			return await formatTaskCallResult(this.core, updatedTask, cleanupMessage ? [`${cleanupMessage}.`] : undefined);
 		} catch (error) {
 			if (isTaskLockError(error)) {
 				throw new BacklogToolError(error.message, "OPERATION_FAILED");
