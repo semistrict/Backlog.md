@@ -1,7 +1,11 @@
 import type { Milestone, Task } from "../../types";
+import { compareTaskRank, type PrioritizationConfig } from "../../utils/prioritization";
 import { getMilestoneLabel, milestoneKey, normalizeMilestoneName } from "../utils/milestones";
 
 export type LaneMode = "none" | "milestone";
+
+/** How a board orders each column: by manual position, or by the project's rank (RICE score or priority). */
+export type BoardOrder = "manual" | "rank";
 
 export interface LaneDefinition {
 	key: string;
@@ -202,10 +206,19 @@ export function buildLanes(
 	];
 }
 
-export function sortTasksForStatus(tasks: Task[], status: string): Task[] {
+/**
+ * Orders one column. Manual order is the stored position (ordinal), then creation date. Passing
+ * `rankBy` orders by rank first (highest first, unranked last) and keeps manual order for ties.
+ */
+export function sortTasksForStatus(tasks: Task[], status: string, rankBy?: PrioritizationConfig | null): Task[] {
+	const compareManual = manualOrderComparator(status);
+	return tasks.slice().sort((a, b) => (rankBy ? compareTaskRank(a, b, rankBy) : 0) || compareManual(a, b));
+}
+
+function manualOrderComparator(status: string): (a: Task, b: Task) => number {
 	const isDoneStatus = status.toLowerCase().includes("done") || status.toLowerCase().includes("complete");
 
-	return tasks.slice().sort((a, b) => {
+	return (a, b) => {
 		// Tasks with ordinal come before tasks without
 		if (a.ordinal !== undefined && b.ordinal === undefined) {
 			return -1;
@@ -226,7 +239,7 @@ export function sortTasksForStatus(tasks: Task[], status: string): Task[] {
 		}
 
 		return a.createdDate.localeCompare(b.createdDate);
-	});
+	};
 }
 
 function normalizeMilestoneValue(value: string | null): string | undefined {
@@ -330,7 +343,13 @@ export function groupTasksByLaneAndStatus(
 	lanes: LaneDefinition[],
 	statuses: string[],
 	tasks: Task[],
-	options?: { archivedMilestoneIds?: string[]; milestoneEntities?: Milestone[]; archivedMilestones?: Milestone[] },
+	options?: {
+		archivedMilestoneIds?: string[];
+		milestoneEntities?: Milestone[];
+		archivedMilestones?: Milestone[];
+		/** Orders columns by rank instead of manual position; see {@link sortTasksForStatus}. */
+		rankBy?: PrioritizationConfig | null;
+	},
 ): Map<string, Map<string, Task[]>> {
 	const result = new Map<string, Map<string, Task[]>>();
 	const archivedKeys = new Set((options?.archivedMilestoneIds ?? []).map((id) => milestoneKey(id)));
@@ -380,7 +399,7 @@ export function groupTasksByLaneAndStatus(
 
 	for (const [, statusMap] of result) {
 		for (const [status, list] of statusMap) {
-			statusMap.set(status, sortTasksForStatus(list, status));
+			statusMap.set(status, sortTasksForStatus(list, status, options?.rankBy));
 		}
 	}
 

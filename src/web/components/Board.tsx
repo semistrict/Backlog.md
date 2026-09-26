@@ -1,7 +1,14 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { type Milestone, type Task } from '../../types';
 import { apiClient, type ReorderTaskPayload } from '../lib/api';
-import { buildLanes, DEFAULT_LANE_KEY, groupTasksByLaneAndStatus, type LaneMode, sortTasksForStatus } from '../lib/lanes';
+import {
+  type BoardOrder,
+  buildLanes,
+  DEFAULT_LANE_KEY,
+  groupTasksByLaneAndStatus,
+  type LaneMode,
+  sortTasksForStatus,
+} from '../lib/lanes';
 import { collectAvailableLabels, labelsToLower } from '../../utils/label-filter';
 import { collectArchivedMilestoneKeys, milestoneKey } from '../utils/milestones';
 import { getTerminalStatus } from '../../utils/terminal-status';
@@ -33,6 +40,8 @@ interface BoardProps {
   archivedMilestones: Milestone[];
   laneMode: LaneMode;
   onLaneChange: (mode: LaneMode) => void;
+  boardOrder?: BoardOrder;
+  onBoardOrderChange?: (order: BoardOrder) => void;
   milestoneFilter?: string | null;
   filterAssignee?: string;
   filterLabels?: string[];
@@ -69,6 +78,8 @@ const Board: React.FC<BoardProps> = ({
   archivedMilestones,
   laneMode,
   onLaneChange,
+  boardOrder = 'manual',
+  onBoardOrderChange,
   milestoneFilter,
   filterAssignee = '',
   filterLabels = [],
@@ -103,6 +114,11 @@ const Board: React.FC<BoardProps> = ({
     [prioritization]
   );
   const usesPriority = getPrioritizationMode(prioritization) === 'priority';
+  // Rank order sorts columns for display only; drops still write manual positions (see handleTaskReorder).
+  const rankBy = useMemo(
+    () => (boardOrder === 'rank' ? (prioritization ?? {}) : null),
+    [boardOrder, prioritization]
+  );
   const typeOptions = useMemo(() => getTaskTypeValues(availableTypes), [availableTypes]);
   const projectOptions = useMemo(() => getProjectValues(availableProjects), [availableProjects]);
   const archivedMilestoneIds = useMemo(
@@ -423,10 +439,30 @@ const Board: React.FC<BoardProps> = ({
     }
   };
 
-  const handleTaskReorder = async (payload: ReorderTaskPayload) => {
+  /**
+   * In rank order a column shows score order, not manual positions, so a drop there must not be
+   * sent as a new manual order: reordering within a column changes nothing, and a drop into
+   * another column appends the task to the end of that column's manual order.
+   */
+  const toManualReorder = (payload: ReorderTaskPayload, movedTask: Task | undefined): ReorderTaskPayload | null => {
+    if (boardOrder !== 'rank') return payload;
+    const sameMilestone =
+      payload.targetMilestone === undefined || (payload.targetMilestone ?? undefined) === movedTask?.milestone;
+    if (movedTask?.status === payload.targetStatus && sameMilestone) return null;
+    const columnTasks = payload.orderedTaskIds
+      .filter((taskId) => taskId !== payload.taskId)
+      .map((taskId) => resolveTaskById(tasks, taskId))
+      .flatMap((resolution) => (resolution.status === 'found' ? [resolution.task] : []));
+    const manualIds = sortTasksForStatus(columnTasks, payload.targetStatus).map((task) => task.id);
+    return { ...payload, orderedTaskIds: [...manualIds, payload.taskId] };
+  };
+
+  const handleTaskReorder = async (displayPayload: ReorderTaskPayload) => {
     try {
-      const requestResolution = resolveTaskById(tasks, payload.taskId);
+      const requestResolution = resolveTaskById(tasks, displayPayload.taskId);
       const requestTask = requestResolution.status === 'found' ? requestResolution.task : undefined;
+      const payload = toManualReorder(displayPayload, requestTask);
+      if (!payload) return;
       const result = await apiClient.reorderTask(payload);
       if (requestTask && onTasksUpdated) {
         onTasksUpdated(result.changedTasks ?? [result.task], requestTask);
@@ -479,8 +515,9 @@ const Board: React.FC<BoardProps> = ({
       archivedMilestoneIds,
       milestoneEntities,
       archivedMilestones,
+      rankBy,
     }),
-    [laneMode, lanes, statuses, tasks, archivedMilestoneIds, milestoneEntities, archivedMilestones]
+    [laneMode, lanes, statuses, tasks, archivedMilestoneIds, milestoneEntities, archivedMilestones, rankBy]
   );
 
   // Separate grouping for filtered display in columns
@@ -490,8 +527,9 @@ const Board: React.FC<BoardProps> = ({
         archivedMilestoneIds,
         milestoneEntities,
         archivedMilestones,
+        rankBy,
       }),
-    [laneMode, lanes, statuses, filteredTasks, archivedMilestoneIds, milestoneEntities, archivedMilestones]
+    [laneMode, lanes, statuses, filteredTasks, archivedMilestoneIds, milestoneEntities, archivedMilestones, rankBy]
   );
 
   const displayTasksByLane = (milestoneFilter || hasActiveFilters) ? filteredTasksByLane : tasksByLane;
@@ -741,6 +779,29 @@ const Board: React.FC<BoardProps> = ({
                 Milestone
               </button>
             </div>
+            {onBoardOrderChange && (
+              <div
+                role="group"
+                aria-label="Board order"
+                className="inline-flex rounded-lg border border-gray-200 dark:border-gray-700 p-1 bg-gray-50 dark:bg-gray-800/50 transition-colors duration-200"
+              >
+                {([['manual', 'Manual'], ['rank', usesPriority ? 'Priority' : 'RICE score']] as const).map(([order, label]) => (
+                  <button
+                    key={order}
+                    type="button"
+                    aria-pressed={boardOrder === order}
+                    onClick={() => onBoardOrderChange(order)}
+                    className={`px-3 py-1.5 text-sm font-medium rounded-md transition-all duration-200 ${
+                      boardOrder === order
+                        ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 shadow-sm'
+                        : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200'
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            )}
             {onFiltersChange && (
               <div className="flex flex-wrap items-center gap-3" aria-label="Board filters">
                 <select

@@ -6,7 +6,7 @@ import { getPrioritizationMode, type PrioritizationConfig } from '../../utils/pr
 import { resolvePriorityValue } from '../../utils/priority-config';
 import { resolveProjectValue } from '../../utils/project-config';
 import { resolveTaskTypeValue } from '../../utils/task-type-config';
-import { type LaneMode } from '../lib/lanes';
+import { type BoardOrder, type LaneMode } from '../lib/lanes';
 
 interface BoardPageProps {
 	onEditTask: (task: Task) => void;
@@ -54,6 +54,35 @@ export default function BoardPage({
 	const [laneMode, setLaneMode] = useState<LaneMode>('none');
 	const [milestoneFilter, setMilestoneFilter] = useState<string | null>(null);
 	const laneStorageKey = 'backlog.board.lane';
+	const [boardOrder, setBoardOrder] = useState<BoardOrder>('manual');
+	const orderStorageKey = 'backlog.board.order';
+
+	// Like lanes, the order comes from the URL first, then the last choice made in this browser.
+	useEffect(() => {
+		const parseOrder = (value: string | null): BoardOrder | null =>
+			value === 'rank' || value === 'manual' ? value : null;
+		const storedOrder = typeof window !== 'undefined' ? window.localStorage.getItem(orderStorageKey) : null;
+		const nextOrder = parseOrder(searchParams.get('order')) ?? parseOrder(storedOrder) ?? 'manual';
+		setBoardOrder((current) => (current === nextOrder ? current : nextOrder));
+		if (typeof window !== 'undefined') {
+			window.localStorage.setItem(orderStorageKey, nextOrder);
+		}
+	}, [searchParams]);
+
+	const handleBoardOrderChange = (order: BoardOrder) => {
+		setBoardOrder(order);
+		if (typeof window !== 'undefined') {
+			window.localStorage.setItem(orderStorageKey, order);
+		}
+		setSearchParams(params => {
+			if (order === 'manual') {
+				params.delete('order');
+			} else {
+				params.set('order', order);
+			}
+			return params;
+		}, { replace: true });
+	};
 
 	useEffect(() => {
 		const storedLane = typeof window !== 'undefined' ? window.localStorage.getItem(laneStorageKey) : null;
@@ -212,6 +241,8 @@ export default function BoardPage({
 				availableLabels={availableLabels}
 				laneMode={laneMode}
 				onLaneChange={handleLaneChange}
+				boardOrder={boardOrder}
+				onBoardOrderChange={handleBoardOrderChange}
 				milestoneFilter={milestoneFilter}
 				filterAssignee={filterAssignee}
 				filterLabels={filterLabels}

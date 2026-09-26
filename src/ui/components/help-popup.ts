@@ -20,6 +20,7 @@ const BOARD_SHORTCUTS: Shortcut[] = [
 	{ key: "P", desc: "Filter by Priority" },
 	{ key: "I", desc: "Filter by Milestone" },
 	{ key: "F", desc: "Filter by Labels" },
+	{ key: "O", desc: "Order columns manually or by rank" },
 	{ key: "←→", desc: "Navigate columns" },
 	{ key: "↑↓", desc: "Navigate tasks" },
 	{ key: "Enter", desc: "View task details" },

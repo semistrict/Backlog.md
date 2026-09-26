@@ -15,7 +15,7 @@ import {
 	NO_MILESTONE_FILTER_LABEL,
 	NO_MILESTONE_FILTER_VALUE,
 } from "../utils/milestone-filter.ts";
-import { getPrioritizationMode, type PrioritizationConfig } from "../utils/prioritization.ts";
+import { compareTaskRank, getPrioritizationMode, type PrioritizationConfig } from "../utils/prioritization.ts";
 import { getPriorityOptions } from "../utils/priority-config.ts";
 import { getProjectValues, resolveProjectValues } from "../utils/project-config.ts";
 import { applyTaskFilters, createTaskSearchIndex } from "../utils/task-search.ts";
@@ -95,10 +95,19 @@ function isDoneStatus(status: string): boolean {
 	return normalized === "done" || normalized === "completed" || normalized === "complete";
 }
 
-function buildColumnTasks(status: string, items: Task[], byId: Map<string, Task>): Task[] {
+function buildColumnTasks(
+	status: string,
+	items: Task[],
+	byId: Map<string, Task>,
+	rankBy?: PrioritizationConfig | null,
+): Task[] {
 	const topLevel: Task[] = [];
 	const childrenByParent = new Map<string, Task[]>();
 	const sorted = items.slice().sort((a, b) => {
+		// Rank order puts the project's rank first and keeps manual order for ties
+		const rankComparison = rankBy ? compareTaskRank(a, b, rankBy) : 0;
+		if (rankComparison !== 0) return rankComparison;
+
 		// Use ordinal for custom sorting if available
 		const aOrd = a.ordinal;
 		const bOrd = b.ordinal;
@@ -144,13 +153,18 @@ function buildColumnTasks(status: string, items: Task[], byId: Map<string, Task>
 	return ordered;
 }
 
-export function prepareBoardColumns(tasks: Task[], statuses: string[]): ColumnData[] {
+/** Board columns in manual order, or by rank (RICE score or priority) when `rankBy` is given. */
+export function prepareBoardColumns(
+	tasks: Task[],
+	statuses: string[],
+	rankBy?: PrioritizationConfig | null,
+): ColumnData[] {
 	const { orderedStatuses, groupedTasks } = buildKanbanStatusGroups(tasks, statuses);
 	const byId = new Map<string, Task>(tasks.map((task) => [task.id, task]));
 
 	return orderedStatuses.map((status) => {
 		const items = groupedTasks.get(status) ?? [];
-		const orderedTasks = buildColumnTasks(status, items, byId);
+		const orderedTasks = buildColumnTasks(status, items, byId, rankBy);
 		return { status, tasks: orderedTasks };
 	});
 }
@@ -416,6 +430,9 @@ export async function renderBoardTui(
 		};
 		// RICE mode has no priority, so it has no priority filter either.
 		const usesPriority = getPrioritizationMode(prioritization) === "priority";
+		// O toggles a rank-ordered view for this session. Moves always happen in manual order.
+		let rankOrder = false;
+		const rankOrderName = usesPriority ? "priority" : "RICE score";
 		const sharedFilters = {
 			searchQuery: options?.filters?.searchQuery ?? "",
 			excludeStatus: [...(options?.filters?.excludeStatus ?? [])],
@@ -841,7 +858,7 @@ export async function renderBoardTui(
 		// Pure function to calculate the projected board state
 		const getProjectedColumns = (allTasks: Task[], operation: MoveOperation | null): ColumnData[] => {
 			if (!operation) {
-				return prepareBoardColumns(allTasks, currentStatuses);
+				return prepareBoardColumns(allTasks, currentStatuses, rankOrder ? prioritization : null);
 			}
 
 			const movingTask = allTasks.find((t) => t.id === operation.taskId);
@@ -1097,7 +1114,11 @@ export async function renderBoardTui(
 					hasProjects: configuredProjects.length > 0,
 					hasPriority: usesPriority,
 				});
-				setFooterContent(hasActiveSharedFilters() ? `${base} | {yellow-fg}Filtered{/}` : base);
+				const indicators = [
+					...(rankOrder ? [`{yellow-fg}By ${rankOrderName}{/}`] : []),
+					...(hasActiveSharedFilters() ? ["{yellow-fg}Filtered{/}"] : []),
+				];
+				setFooterContent([base, ...indicators].join(" | "));
 			}
 			syncBoardAreaLayout();
 		};
@@ -1305,6 +1326,12 @@ export async function renderBoardTui(
 				void openFilterPicker("priority");
 			});
 		}
+
+		screen.key(["o", "O"], () => {
+			if (popupOpen || filterPopupOpen || modalOpen || currentFocus === "filters" || moveOp) return;
+			rankOrder = !rankOrder;
+			renderView();
+		});
 
 		screen.key(["t", "T"], () => {
 			if (popupOpen || filterPopupOpen || modalOpen || moveOp) return;
@@ -1883,6 +1910,12 @@ export async function renderBoardTui(
 			if (hasMoveBlockingSharedFilters()) {
 				showTransientFooter(" {yellow-fg}Clear filters before moving tasks.{/}");
 				return;
+			}
+
+			// Moves write manual positions, so they are made where those positions are visible.
+			if (rankOrder) {
+				rankOrder = false;
+				renderView();
 			}
 
 			const column = columns[currentCol];

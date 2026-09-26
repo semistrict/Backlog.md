@@ -370,6 +370,102 @@ describe("Web board filters", () => {
 		expect(window.location.search).toBe("");
 	});
 
+	describe("rank order", () => {
+		const rankedTasks = [
+			createTask({ id: "task-301", title: "First by hand", ordinal: 1000, rice: { reach: 10, impact: 1, confidence: 100, effort: 1 } }),
+			createTask({ id: "task-302", title: "Best score", ordinal: 2000, rice: { reach: 500, impact: 2, confidence: 80, effort: 3 } }),
+			createTask({ id: "task-303", title: "No score", ordinal: 3000 }),
+			createTask({ id: "task-304", title: "Waiting elsewhere", status: "In Progress", ordinal: 1000 }),
+			createTask({ id: "task-305", title: "Also elsewhere", status: "In Progress", ordinal: 2000, rice: { reach: 9, impact: 3, confidence: 100, effort: 1 } }),
+		];
+
+		const columnCardIds = (container: HTMLElement, status: string): string[] => {
+			const heading = Array.from(container.querySelectorAll("h3")).find((candidate) => candidate.textContent === status);
+			const column = heading?.closest(".rounded-lg");
+			return Array.from(column?.querySelectorAll('[role="button"][aria-label^="Open "]') ?? []).map(
+				(card) => card.getAttribute("aria-label")?.match(/^Open ([^:]+):/)?.[1] ?? "",
+			);
+		};
+
+		const dropOn = async (container: HTMLElement, status: string, taskId: string, sourceStatus: string) => {
+			const heading = Array.from(container.querySelectorAll("h3")).find((candidate) => candidate.textContent === status);
+			const dropEvent = new window.Event("drop", { bubbles: true, cancelable: true });
+			Object.defineProperty(dropEvent, "dataTransfer", {
+				value: { getData: (type: string) => (type === "text/plain" ? taskId : type === "text/status" ? sourceStatus : "") },
+			});
+			await act(async () => {
+				heading?.closest(".rounded-lg")?.dispatchEvent(dropEvent);
+				await Promise.resolve();
+			});
+		};
+
+		it("keeps manual order by default and orders by RICE score on request without writing", async () => {
+			const originalReorderTask = apiClient.reorderTask.bind(apiClient);
+			let writes = 0;
+			apiClient.reorderTask = async () => {
+				writes += 1;
+				throw new Error("unexpected write");
+			};
+			try {
+				const container = renderBoardPage("http://localhost/board", {
+					tasks: rankedTasks,
+					prioritization: { prioritization: "rice" },
+				});
+				expect(columnCardIds(container, "To Do")).toEqual(["task-301", "task-302", "task-303"]);
+
+				const rankButton = Array.from(container.querySelectorAll('[aria-label="Board order"] button')).find(
+					(button) => button.textContent === "RICE score",
+				);
+				if (!rankButton) throw new Error("Expected a RICE score order button");
+				await clickElement(rankButton);
+
+				expect(columnCardIds(container, "To Do")).toEqual(["task-302", "task-301", "task-303"]);
+				expect(new URLSearchParams(window.location.search).get("order")).toBe("rank");
+				expect(window.localStorage.getItem("backlog.board.order")).toBe("rank");
+				expect(writes).toBe(0);
+			} finally {
+				apiClient.reorderTask = originalReorderTask;
+			}
+		});
+
+		it("labels the rank order Priority in priority mode", () => {
+			const container = renderBoardPage("http://localhost/board?order=rank", { tasks: rankedTasks });
+			const labels = Array.from(container.querySelectorAll('[aria-label="Board order"] button')).map(
+				(button) => button.textContent,
+			);
+			expect(labels).toEqual(["Manual", "Priority"]);
+		});
+
+		it("ignores drops within a column and appends cross-column drops in manual order", async () => {
+			const originalReorderTask = apiClient.reorderTask.bind(apiClient);
+			const payloads: unknown[] = [];
+			apiClient.reorderTask = async (payload) => {
+				payloads.push(payload);
+				const moved = rankedTasks.find((task) => task.id === payload.taskId) as Task;
+				return { success: true, task: { ...moved, status: payload.targetStatus }, changedTasks: [] };
+			};
+			try {
+				const container = renderBoardPage("http://localhost/board?order=rank", {
+					tasks: rankedTasks,
+					prioritization: { prioritization: "rice" },
+					onTasksUpdated: () => {},
+				});
+				expect(columnCardIds(container, "In Progress")).toEqual(["task-305", "task-304"]);
+
+				await dropOn(container, "To Do", "task-301", "To Do");
+				expect(payloads).toEqual([]);
+
+				await dropOn(container, "In Progress", "task-302", "To Do");
+				await waitFor(() => payloads.length === 1);
+				expect(payloads).toEqual([
+					{ taskId: "task-302", targetStatus: "In Progress", orderedTaskIds: ["task-304", "task-305", "task-302"] },
+				]);
+			} finally {
+				apiClient.reorderTask = originalReorderTask;
+			}
+		});
+	});
+
 	it("renders and filters configured custom priorities", async () => {
 		const customTasks = [
 			...tasks,
