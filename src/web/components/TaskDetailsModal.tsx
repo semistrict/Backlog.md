@@ -10,7 +10,13 @@ import {
 } from "../../types";
 import { type TaskDetail, taskDependencyGraph, taskReadiness } from "../../core/task-detail";
 import Modal from "./Modal";
-import { apiClient, NetworkError, readDemotionFailureCause, readMovedFailureState } from "../lib/api";
+import {
+  apiClient,
+  NetworkError,
+  readDemotionFailureCause,
+  readMovedFailureState,
+  type TaskUpdateRequest,
+} from "../lib/api";
 import { useTheme } from "../contexts/ThemeContext";
 import MDEditor from "@uiw/react-md-editor";
 import AcceptanceCriteriaEditor from "./AcceptanceCriteriaEditor";
@@ -822,6 +828,16 @@ export const TaskDetailsModal: React.FC<Props> = ({
     return payload;
   };
 
+  // The server fails fast while a task is being written, so every update this modal sends waits
+  // for the one before it. Otherwise a field that saves on blur (the sidebar title, RICE inputs)
+  // races the Save click that blurred it, and the second request is rejected with a lock error.
+  const updateChainRef = useRef<Promise<unknown>>(Promise.resolve());
+  const updateTask = useCallback((taskId: string, updates: TaskUpdateRequest) => {
+    const request = updateChainRef.current.catch(() => {}).then(() => apiClient.updateTask(taskId, updates));
+    updateChainRef.current = request;
+    return request;
+  }, []);
+
   const handleSave = async () => {
     if (demoting) return;
     setSaving(true);
@@ -875,7 +891,7 @@ export const TaskDetailsModal: React.FC<Props> = ({
       } else if (task) {
         Object.assign(taskData, buildDefinitionOfDoneEditPayload());
         // Update existing task
-        await apiClient.updateTask(task.id, taskData);
+        await updateTask(task.id, taskData);
         setMode("preview");
         if (onSaved) await onSaved();
         setCommentsChanged(false);
@@ -906,7 +922,7 @@ export const TaskDetailsModal: React.FC<Props> = ({
     const next = (criteria || []).map((c) => (c.index === index ? { ...c, checked } : c));
     setCriteria(next);
     try {
-      await apiClient.updateTask(task.id, { acceptanceCriteriaItems: next });
+      await updateTask(task.id, { acceptanceCriteriaItems: next });
       if (onSaved) await onSaved();
     } catch (err) {
       // rollback
@@ -925,7 +941,7 @@ export const TaskDetailsModal: React.FC<Props> = ({
       const updates: TaskUpdatePayload = checked
         ? { definitionOfDoneCheck: [index] }
         : { definitionOfDoneUncheck: [index] };
-      await apiClient.updateTask(task.id, updates);
+      await updateTask(task.id, updates);
       if (onSaved) await onSaved();
     } catch (err) {
       setDefinitionOfDone(definitionOfDone);
@@ -963,7 +979,7 @@ export const TaskDetailsModal: React.FC<Props> = ({
     // Only update server if editing existing task
     if (task) {
       try {
-        await apiClient.updateTask(task.id, updates);
+        await updateTask(task.id, updates);
         if (onSaved) await onSaved();
       } catch (err) {
         console.error("Failed to update task metadata", err);
@@ -991,7 +1007,7 @@ export const TaskDetailsModal: React.FC<Props> = ({
     setTaskType(nextType);
 
     try {
-      const updatedTask = await apiClient.updateTask(task.id, { type: nextType });
+      const updatedTask = await updateTask(task.id, { type: nextType });
       if (typeUpdateRequestRef.current !== requestId) return;
       setTaskType(updatedTask.type ?? "");
       if (onSaved) {
@@ -1031,7 +1047,7 @@ export const TaskDetailsModal: React.FC<Props> = ({
     setError(null);
     preserveEditModeAfterCommentRefresh.current = true;
     try {
-      const updatedTask = await apiClient.updateTask(task.id, {
+      const updatedTask = await updateTask(task.id, {
         commentsAppend: [body],
         ...(author.length > 0 && { commentAuthor: author }),
       });
