@@ -5,6 +5,7 @@
 
 import type { ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import { watch } from "node:fs";
 import { chmod, copyFile, mkdir, rm, writeFile } from "node:fs/promises";
 import net from "node:net";
 import { join } from "node:path";
@@ -328,4 +329,41 @@ async function initializeTestProjectWithOptions(
 		const repoRoot = await core.gitOps.stageBacklogDirectory(core.filesystem.backlogDirName);
 		await core.gitOps.commitChanges(`backlog: Initialize backlog project: ${projectName}`, repoRoot);
 	}
+}
+
+/**
+ * On macOS, Bun serves every `fs.watch` in the process from one FSEvents stream and rebuilds it
+ * whenever any watcher is added or closed. The rebuild is asynchronous and the new stream only
+ * reports changes from then on, so a change made right after watchers start (or rebind) is never
+ * reported, and a test waiting for it times out under load.
+ *
+ * This waits until the current stream is live: a probe watcher, added after the ones under test,
+ * sees one of its own writes. Keep the returned probe open until the change under test has been
+ * observed, because closing it rebuilds the stream again.
+ */
+export async function waitForFileWatchersLive(
+	timeout = getPlatformTimeout(15000),
+): Promise<{ close(): Promise<void> }> {
+	const probeDir = createUniqueTestDir("watch-probe");
+	await mkdir(probeDir, { recursive: true });
+	let observed = false;
+	const watcher = watch(probeDir, () => {
+		observed = true;
+	});
+	const deadline = Date.now() + timeout;
+	// A write made before the stream is live is lost, so keep writing until one is reported.
+	for (let write = 0; !observed; write += 1) {
+		if (Date.now() >= deadline) {
+			watcher.close();
+			throw new Error("Timed out waiting for file watchers to go live");
+		}
+		await writeFile(join(probeDir, "probe"), String(write));
+		await sleep(25);
+	}
+	return {
+		close: async () => {
+			watcher.close();
+			await rm(probeDir, { recursive: true, force: true });
+		},
+	};
 }

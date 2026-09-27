@@ -103,7 +103,9 @@ const respond = async (url: URL, init?: RequestInit): Promise<Response> => {
 	if (url.pathname === "/api/search") {
 		if (failRefreshSearch) {
 			archiveRecoveryEvents.push("refresh");
-			throw new Error("Search network failure");
+			// A client error, because the API client retries network and server errors with seconds of
+			// backoff: that chain would outlive the test and fall back to the real fetch in a later one.
+			return json({ error: "Search failed" }, 400);
 		}
 		if (searchHold) await searchHold;
 		return json(tasks.map((task) => ({ type: "task", task, score: 1 })) satisfies SearchResult[]);

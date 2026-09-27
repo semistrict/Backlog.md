@@ -12,7 +12,14 @@ import { parseTask } from "../markdown/parser.ts";
 import { serializeDocument, serializeTask } from "../markdown/serializer.ts";
 import type { BacklogConfig, Decision, Document, Task } from "../types/index.ts";
 import { normalizeTaskIdentity } from "../utils/task-path.ts";
-import { createUniqueTestDir, getPlatformTimeout, safeCleanup, sleep, waitUntil } from "./test-utils.ts";
+import {
+	createUniqueTestDir,
+	getPlatformTimeout,
+	safeCleanup,
+	sleep,
+	waitForFileWatchersLive,
+	waitUntil,
+} from "./test-utils.ts";
 
 let TEST_DIR: string;
 
@@ -114,6 +121,7 @@ describe("ContentStore", () => {
 
 	afterEach(async () => {
 		store?.dispose();
+		for (const probe of watchProbes.splice(0)) await probe.close();
 		await safeCleanup(TEST_DIR);
 	});
 
@@ -525,6 +533,7 @@ describe("ContentStore", () => {
 		store = await core.getContentStore();
 
 		expect(store.resolveTaskForMutation(sampleTask.id).status).toBe("found");
+		await watchersLive();
 		await Bun.write(
 			join(core.fs.completedDir, "task-01 - Completed collision.md"),
 			serializeTask({ ...sampleTask, id: "TASK-01", title: "Completed collision" }),
@@ -592,6 +601,7 @@ describe("ContentStore", () => {
 		const unsubscribe = store.subscribe((event) => {
 			if (event.type === "tasks") observedResolutions.push(store.resolveTaskForRead("TASK-1").status);
 		});
+		await watchersLive();
 		await Bun.write(
 			join(filesystem.tasksDir, "task-1 - Current-worktree.md"),
 			serializeTask({ ...sampleTask, id: "TASK-1", title: "Current worktree" }),
@@ -613,6 +623,7 @@ describe("ContentStore", () => {
 		const unsubscribe = store.subscribe((event) => {
 			if (event.type === "tasks") observedResolutions.push(store.resolveTaskForMutation("TASK-1").status);
 		});
+		await watchersLive();
 		await Bun.write(
 			join(filesystem.tasksDir, filename),
 			serializeTask({ ...sampleTask, id: "TASK-1", title: "Current same-path version" }),
@@ -640,6 +651,7 @@ describe("ContentStore", () => {
 			const resolution = store.resolveTaskForRead("TASK-1");
 			if (resolution.status === "found") observedTitles.push(resolution.task.title);
 		});
+		await watchersLive();
 		await unlink(localPath);
 
 		await waitUntil(() => observedTitles.length > 0, "watched same-path branch fallback", getPlatformTimeout(3000));
@@ -665,6 +677,7 @@ describe("ContentStore", () => {
 		const unsubscribe = store.subscribe((event) => {
 			if (event.type === "tasks") observedResolutions.push(store.resolveTaskForRead("TASK-1").status);
 		});
+		await watchersLive();
 		await unlink(localPath);
 
 		await waitUntil(
@@ -2478,6 +2491,7 @@ describe("ContentStore", () => {
 			throw new Error("Expected decision file was not created");
 		}
 
+		await watchersLive();
 		await unlink(task.filePath);
 		await waitForContentState(
 			store,
@@ -3035,6 +3049,7 @@ describe("ContentStore", () => {
 				lifecycleEventTimeout,
 				"root B config publication",
 			);
+			await watchersLive();
 			await replaceRootConfig(configPath, rootConfig("Root B", rootB));
 			await waitUntil(() => filesystem.backlogDirName === rootB, "root B publication");
 
@@ -3048,6 +3063,7 @@ describe("ContentStore", () => {
 			await withTimeout(heldOldRefresh, "old-root refresh completion", lifecycleGateTimeout);
 			await withTimeout(heldBLoad.started, "root B snapshot load", lifecycleGateTimeout);
 
+			await watchersLive();
 			await writeFixture(fixtureB, "202", "b-2");
 			heldBLoad.release();
 			const rootBEvent = await rootBPublished;
@@ -3076,6 +3092,7 @@ describe("ContentStore", () => {
 				lifecycleEventTimeout,
 				"held root B config publication",
 			);
+			await watchersLive();
 			await replaceRootConfig(configPath, rootConfig("Root B held", rootB));
 			await withTimeout(heldBConfigLoad.started, "held root B config load", lifecycleGateTimeout);
 			const rootAReturned = waitForEventWithTimeout(
@@ -3084,6 +3101,7 @@ describe("ContentStore", () => {
 				lifecycleEventTimeout,
 				"returned root A config publication",
 			);
+			await watchersLive();
 			await replaceRootConfig(configPath, rootConfig("Root A returned", rootA));
 			await sleep(getPlatformTimeout(150));
 			heldBConfigLoad.release();
@@ -3096,6 +3114,7 @@ describe("ContentStore", () => {
 				"decision-a-3",
 			]);
 
+			await watchersLive();
 			await writeFixture(fixtureA, "104", "a-4");
 			await waitForContentState(
 				store,
@@ -3121,6 +3140,7 @@ describe("ContentStore", () => {
 			expect(restarted.tasks.some((task) => task.id === "TASK-105")).toBe(true);
 			expect(restarted.documents.some((document) => document.id === "doc-a-5")).toBe(true);
 			expect(restarted.decisions.some((decision) => decision.id === "decision-a-5")).toBe(true);
+			await watchersLive();
 			await writeFixture(fixtureA, "106", "a-6");
 			await waitForContentState(
 				store,
@@ -3188,12 +3208,14 @@ describe("ContentStore", () => {
 			(event) => event.type === "config" && event.config.projectName === "Rebound config watcher",
 			getPlatformTimeout(15000),
 		);
+		await watchersLive();
 		await replaceRootConfig(join(TEST_DIR, "backlog.config.yml"), rootConfig("Rebound config watcher", customRoot));
 		const reboundEvent = await reboundConfig;
 		expect(reboundEvent.snapshot.tasks.map((task) => task.id)).toEqual(["TASK-301"]);
 		expect(reboundEvent.snapshot.documents.map((document) => document.id)).toEqual(["doc-custom-1"]);
 		expect(reboundEvent.snapshot.decisions.map((decision) => decision.id)).toEqual(["decision-custom-1"]);
 
+		await watchersLive();
 		await writeFixture(fixture, "302", "custom-2");
 		await waitForContentState(
 			store,
@@ -3206,6 +3228,14 @@ describe("ContentStore", () => {
 		);
 	});
 });
+
+/** Probes opened by {@link watchersLive}, closed after each test once its watched changes were seen. */
+const watchProbes: Array<{ close(): Promise<void> }> = [];
+
+/** Call right before a file change a test waits to observe; see {@link waitForFileWatchersLive}. */
+async function watchersLive(): Promise<void> {
+	watchProbes.push(await waitForFileWatchersLive());
+}
 
 interface ObservedContentState {
 	tasks: Task[];
